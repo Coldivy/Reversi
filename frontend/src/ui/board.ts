@@ -23,7 +23,8 @@ export class BoardView {
 
     cells.forEach(({ row, col }) => {
       const cell = document.createElement("div");
-      cell.className = "cell";
+      const colorClass = (row + col) % 2 === 0 ? "cell-dark" : "cell-light";
+      cell.className = `cell ${colorClass}`;
       cell.dataset.row = row.toString();
       cell.dataset.col = col.toString();
       cell.id = `cell-${row}-${col}`;
@@ -58,7 +59,7 @@ export class BoardView {
         // 如果有棋子，创建棋子 DOM
         if (grid[r][c] !== 0) {
           const piece = document.createElement("div");
-          piece.className = `piece ${grid[r][c] === 1 ? "black" : "white"}`;
+          piece.className = `piece_${grid[r][c] === 1 ? "black" : "white"}`;
           cell.appendChild(piece);
         }
       }

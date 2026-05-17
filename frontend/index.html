@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Reversi</title>
+    <link rel="stylesheet" href="src/style.css" />
+  </head>
+  <body>
+    <div class="game-wrapper">
+      <!-- 顶部字母 -->
+      <div class="labels-top">
+        <span>a</span><span>b</span><span>c</span><span>d</span><span>e</span
+        ><span>f</span><span>g</span><span>h</span>
+      </div>
+
+      <div id="board" class="board">
+        <!-- 棋盘 -->
+      </div>
+
+      <!-- 左侧数字 -->
+      <div class="labels-left">
+        <span>8</span><span>7</span><span>6</span><span>5</span><span>4</span
+        ><span>3</span><span>2</span><span>1</span>
+      </div>
+    </div>
+
+    <!-- 信息框 -->
+    <div id="msgbox" class="msgbox">
+      <div id="game-score"></div>
+      <div id="game-status"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

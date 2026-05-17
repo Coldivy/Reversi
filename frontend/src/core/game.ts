@@ -22,7 +22,11 @@ export class GameEngine {
     this._player = 1;
   }
 
-  public isValidMove(r: number, c: number, player: PlayerValue): boolean {
+  public isValidMove(
+    r: number,
+    c: number,
+    player: PlayerValue = this._player,
+  ): boolean {
     if (this.currentGrid[r][c] != 0) return false;
     return this.getFlippablePieces(r, c, player).length > 0;
   }
@@ -136,5 +140,14 @@ export class GameEngine {
       },
       { black: 0, white: 0, empty: 0 }, // 初始值
     );
+  }
+
+  public getWinner(): "Black" | "White" | "Draw" | null {
+    if (!this.isGameOver()) return null;
+
+    const score = this.getScore();
+    if (score.black > score.white) return "Black";
+    if (score.white > score.black) return "White";
+    return "Draw";
   }
 }
