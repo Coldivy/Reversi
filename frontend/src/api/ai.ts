@@ -5,7 +5,7 @@ export interface Point {
 }
 
 // Python 后端地址 (如果是本地开发，通常是 5000 或 8000 端口)
-const AI_API_URL = "http://127.0.0.1:8000/api/ai-move";
+const AI_API_URL = "/api/ai-move";
 
 /**
  * 向 Python 后端请求 AI 的下一步落子

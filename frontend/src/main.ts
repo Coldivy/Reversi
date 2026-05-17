@@ -37,6 +37,7 @@ function syncUI() {
 // ==========================================
 // 模式 A: 双人对弈 (人类 vs 人类)
 // ==========================================
+// @ts-ignore
 async function handleHumanVsHuman(r: number, c: number) {
   const success = engine.makeMove(r, c);
   if (success) {
