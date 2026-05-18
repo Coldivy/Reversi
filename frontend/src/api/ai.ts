@@ -15,7 +15,7 @@ const AI_API_URL = "/api/ai-move";
  */
 export async function fetchAIMove(
   grid: number[][],
-  aiPlayerValue: number = -1,
+  aiPlayerValue: number,
 ): Promise<Point> {
   try {
     // 发起 POST 请求

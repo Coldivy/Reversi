@@ -1,10 +1,20 @@
 import { BoardView } from "./ui/board";
-import { GameEngine } from "./core/game";
 import { MessageView } from "./ui/msg";
+import { showChoosePanel } from "./ui/choose";
+import { GameEngine } from "./core/game";
+import type { PlayerValue } from "./core/game";
 import { fetchAIMove } from "./api/ai";
 
+// 定义游戏状态
+type GameStep = "choose" | "playing" | "end";
+
+// 玩家颜色
+let aiPlayerValue: PlayerValue;
+let playerValue: PlayerValue;
+
 // 初始化引擎和 UI 组件
-const engine = new GameEngine();
+let engine: GameEngine;
+let view: BoardView;
 const msgView = new MessageView("game-status", "game-score");
 
 // 预防 Vite HMR 重复绑定：如果已经有实例，先清空或刷新
@@ -12,8 +22,11 @@ const boardContainer = document.getElementById("board")!;
 const newBoard = boardContainer.cloneNode(true);
 boardContainer.parentNode!.replaceChild(newBoard, boardContainer);
 
-// 唯一的全局锁
+// 全局锁
 let isProcessing = false;
+
+// 游戏状态
+let step: GameStep = "choose";
 
 /**
  * 统一同步 UI 的函数
@@ -29,6 +42,7 @@ function syncUI() {
     blackScore: score.black,
     whiteScore: score.white,
     currentPlayerName: engine.currentPlayer,
+    currentPlayerValue: engine._player,
     isGameOver: engine.isGameOver(),
     winner: engine.getWinner(), // "Black", "White", "Draw" 或 null
   });
@@ -49,6 +63,8 @@ async function handleHumanVsHuman(r: number, c: number) {
 // 模式 B: 人机对弈 (人类 vs Python AI)
 // ==========================================
 async function handleHumanVsAI(r: number, c: number) {
+  // 检查是否出于playing阶段
+  if (step !== "playing") return;
   // 1. 瞬间拦截：第一行就检查锁
   if (isProcessing) return;
 
@@ -78,7 +94,7 @@ async function handleHumanVsAI(r: number, c: number) {
       // 获取当前棋盘状态副本，防止引用冲突
       const currentGrid = JSON.parse(JSON.stringify(engine.getGrid()));
 
-      const aiMove = await fetchAIMove(currentGrid, -1);
+      const aiMove = await fetchAIMove(currentGrid, aiPlayerValue);
       console.log(`AI 返回坐标: [${aiMove.r}, ${aiMove.c}]`);
 
       if (aiMove.r === -1) {
@@ -114,8 +130,16 @@ async function handleHumanVsAI(r: number, c: number) {
 
 // 初始化棋盘视图
 // --- 在这里切换模式：将 handleHumanVsAI 换成 handleHumanVsHuman 即可切换 ---
-const view = new BoardView("board", handleHumanVsAI);
-// const view = new BoardView("board", handleHumanVsHuman);
+// view = new BoardView("board", handleHumanVsHuman);
+showChoosePanel((selectedColor) => {
+  // 这里的 selectedColor 应该是符合 PlayerValue 类型的数字 (1 或 -1)
+  playerValue = selectedColor as PlayerValue;
+  aiPlayerValue = -selectedColor as PlayerValue;
 
-// 首次渲染（显示初始四子和初始比分）
-syncUI();
+  // 在此处实例化，解决 "used before being assigned"
+  engine = new GameEngine(playerValue);
+  view = new BoardView("board", handleHumanVsAI);
+
+  step = "playing";
+  syncUI(); // 初始渲染
+});

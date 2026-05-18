@@ -208,3 +208,81 @@ body {
 .notice-popup.hide {
   opacity: 0;
 }
+
+/* 选择颜色全屏遮罩（负责虚化背景 + 居中面板) */
+#choose-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+
+  /* 背景虚化 */
+  background: rgba(245, 245, 240, 1);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+
+  /* 让内部面板居中（不受 body 任何布局影响） */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+
+  z-index: 1000; /* 确保在所有内容之上 */
+}
+
+/* 白底选择面板 */
+#choose-panel {
+  background: #ffffff;
+  border: none;
+  border-radius: 20px;
+  padding: 40px 50px;
+  text-align: center;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.2);
+  font-family: sans-serif;
+  max-width: 320px;
+  width: 90%;
+}
+
+#choose-panel p {
+  margin: 0 0 30px 0;
+  font-size: 20px;
+  font-weight: 500;
+  color: #333;
+  line-height: 1.4;
+}
+
+/* 两个棋子选项按钮 */
+#btn-black,
+#btn-white {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  font-size: 18px;
+  font-weight: bold;
+  cursor: pointer;
+  margin: 0 15px;
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
+  user-select: none;
+}
+
+#btn-black:hover,
+#btn-white:hover {
+  transform: scale(1.08);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+
+#btn-black {
+  background: #2d2d2d;
+  color: white;
+}
+
+#btn-white {
+  background: #f5f5f5;
+  color: #333;
+  border: 2px solid #ccc;
+}

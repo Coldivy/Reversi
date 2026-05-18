@@ -1,8 +1,8 @@
 import { MessageView } from "../ui/msg";
 
 // 定义类型
-type PlayerValue = 1 | -1;
-type PlayerName = "Player" | "AI";
+export type PlayerValue = 1 | -1;
+export type PlayerName = "Player" | "AI";
 
 // 定义返回结果的接口
 export interface GameScore {
@@ -12,16 +12,18 @@ export interface GameScore {
 }
 
 export class GameEngine {
-  private _player: PlayerValue;
+  public _player: PlayerValue;
+  private initialPlayer: PlayerValue;
   private currentGrid: number[][];
 
-  constructor() {
+  constructor(player: PlayerValue) {
     // 初始化棋盘，黑为1，白为-1
     this.currentGrid = Array.from({ length: 8 }, () => Array(8).fill(0));
     this.currentGrid[3][3] = this.currentGrid[4][4] = -1;
     this.currentGrid[3][4] = this.currentGrid[4][3] = 1;
     // 初始化先手，玩家先手
-    this._player = 1;
+    this._player = player;
+    this.initialPlayer = player;
   }
 
   public isValidMove(
@@ -91,7 +93,7 @@ export class GameEngine {
   }
 
   public get currentPlayer(): PlayerName {
-    return this._player === 1 ? "Player" : "AI";
+    return this._player === this.initialPlayer ? "Player" : "AI";
   }
 
   public makeMove(r: number, c: number): boolean {

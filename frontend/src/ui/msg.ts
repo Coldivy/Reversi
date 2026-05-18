@@ -1,7 +1,10 @@
+import type { PlayerValue } from "../core/game";
+
 export interface GameStatus {
   blackScore: number;
   whiteScore: number;
   currentPlayerName: string;
+  currentPlayerValue: PlayerValue;
   isGameOver: boolean;
   winner: string | null;
 }
@@ -30,7 +33,7 @@ export class MessageView {
       }
     } else {
       this.statusElement.classList.remove("game-over");
-      this.statusElement.innerHTML = `当前回合: <strong>${status.currentPlayerName === "Player" ? "人类 (黑)" : "AI/对手 (白)"}</strong>`;
+      this.statusElement.innerHTML = `当前回合: <strong>${status.currentPlayerName === "Player" ? "人类" : "AI/对手 "}${status.currentPlayerValue === 1 ? "（黑）" : "（白）"}</strong>`;
     }
   }
 
