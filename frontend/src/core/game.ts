@@ -1,3 +1,5 @@
+import { MessageView } from "../ui/msg";
+
 // 定义类型
 type PlayerValue = 1 | -1;
 type PlayerName = "Player" | "AI";
@@ -106,8 +108,10 @@ export class GameEngine {
     if (!this.canMove(this._player)) {
       if (this.isGameOver()) {
         console.log("游戏结束！双方均无合法落子。");
+        MessageView.flashNotice("游戏结束！双方均无合法落子");
       } else {
         console.log(`${this._player} 无处落子，跳过回合。`);
+        MessageView.flashNotice("无处落子，跳过回合");
         this.switch(); // 自动切回当前落子方
       }
     }

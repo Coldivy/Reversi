@@ -35,12 +35,24 @@ export class MessageView {
   }
 
   // 显示临时通知的方法（比如：“无处落子，跳过回合”）
-  public flashNotice(text: string) {
+  public static flashNotice(text: string) {
     const notice = document.createElement("div");
     notice.className = "notice-popup";
     notice.innerText = text;
     document.body.appendChild(notice);
 
-    setTimeout(() => notice.remove(), 2000); // 2秒后自动消失
+    // 停留一段时间后开始淡出
+    setTimeout(() => {
+      notice.classList.add("hide");
+
+      // 监听过渡动画结束事件
+      notice.addEventListener(
+        "transitionend",
+        () => {
+          notice.remove();
+        },
+        { once: true },
+      ); // { once: true } 确保监听器只执行一次
+    }, 1000);
   }
 }
