@@ -48,9 +48,41 @@ function syncUI() {
   });
 }
 
-// ==========================================
+// AI 思考和落子逻辑
+async function runAIProcess() {
+  if (isProcessing) return;
+
+  try {
+    isProcessing = true;
+
+    // 只要游戏没结束，且当前轮到 AI，就持续运行
+    while (!engine.isGameOver() && (engine.currentPlayer as string) === "AI") {
+      console.log("%c轮到 AI 思考...", "color: blue; font-weight: bold;");
+
+      const currentGrid = JSON.parse(JSON.stringify(engine.getGrid()));
+      const aiMove = await fetchAIMove(currentGrid, aiPlayerValue);
+
+      if (aiMove.r === -1) {
+        // engine.makeMove 内部会处理跳过，但为了安全这里 break
+        break;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 600)); // 视觉延迟
+
+      const aiSuccess = engine.makeMove(aiMove.r, aiMove.c);
+      if (!aiSuccess) break;
+
+      syncUI();
+    }
+  } catch (error) {
+    console.error("AI 执行出错:", error);
+  } finally {
+    isProcessing = false;
+    syncUI();
+  }
+}
+
 // 模式 A: 双人对弈 (人类 vs 人类)
-// ==========================================
 // @ts-ignore
 async function handleHumanVsHuman(r: number, c: number) {
   const success = engine.makeMove(r, c);
@@ -59,87 +91,34 @@ async function handleHumanVsHuman(r: number, c: number) {
   }
 }
 
-// ==========================================
 // 模式 B: 人机对弈 (人类 vs Python AI)
-// ==========================================
 async function handleHumanVsAI(r: number, c: number) {
-  // 检查是否出于playing阶段
-  if (step !== "playing") return;
-  // 1. 瞬间拦截：第一行就检查锁
-  if (isProcessing) return;
-
-  // 2. 身份检查：不是人类回合不准动
+  if (step !== "playing" || isProcessing) return;
   if (engine.currentPlayer !== "Player") return;
 
-  try {
-    isProcessing = true; // 锁定
+  // 1. 玩家落子
+  const playerSuccess = engine.makeMove(r, c);
+  if (!playerSuccess) return;
 
-    // 3. 玩家落子
-    console.log(`玩家尝试落子: [${r}, ${c}]`);
-    const playerSuccess = engine.makeMove(r, c);
-    if (!playerSuccess) {
-      console.warn("无效的人类落子");
-      isProcessing = false;
-      return;
-    }
+  syncUI();
 
-    syncUI();
-
-    // 4. 进入 AI 自动化处理循环
-    // 只要游戏没结束，且轮到 AI，就一直跑（处理 AI 连走的情况）
-
-    while (!engine.isGameOver() && (engine.currentPlayer as string) === "AI") {
-      console.log("%c轮到 AI 思考...", "color: blue; font-weight: bold;");
-
-      // 获取当前棋盘状态副本，防止引用冲突
-      const currentGrid = JSON.parse(JSON.stringify(engine.getGrid()));
-
-      const aiMove = await fetchAIMove(currentGrid, aiPlayerValue);
-      console.log(`AI 返回坐标: [${aiMove.r}, ${aiMove.c}]`);
-
-      if (aiMove.r === -1) {
-        console.log("AI 无棋可走，自动跳过");
-        // 实际上 engine.makeMove 内部已处理跳过，
-        // 这里 break 是为了防止死循环
-        break;
-      }
-
-      // 视觉延迟
-      await new Promise((resolve) => setTimeout(resolve, 600));
-
-      // 执行 AI 落子
-      const aiSuccess = engine.makeMove(aiMove.r, aiMove.c);
-
-      if (!aiSuccess) {
-        // 如果这里报错，说明后端 AI 算的棋步在前端 Engine 看来是违规的
-        // 或者是由于并发导致该位置已被占
-        console.error("%c逻辑冲突：AI 返回了非法坐标", "color: red", aiMove);
-        break;
-      }
-
-      syncUI();
-    }
-  } catch (error) {
-    console.error("执行过程出错:", error);
-  } finally {
-    isProcessing = false; // 最终必须解锁
-    console.log("流程结束，解锁");
-    syncUI();
-  }
+  // 2. 玩家落子结束后，触发 AI
+  await runAIProcess();
 }
 
-// 初始化棋盘视图
-// --- 在这里切换模式：将 handleHumanVsAI 换成 handleHumanVsHuman 即可切换 ---
-// view = new BoardView("board", handleHumanVsHuman);
+// 选择面板与初始化
 showChoosePanel((selectedColor) => {
-  // 这里的 selectedColor 应该是符合 PlayerValue 类型的数字 (1 或 -1)
   playerValue = selectedColor as PlayerValue;
   aiPlayerValue = -selectedColor as PlayerValue;
 
-  // 在此处实例化，解决 "used before being assigned"
-  engine = new GameEngine(playerValue);
+  engine = new GameEngine(playerValue); // 这里内部现在固定黑棋先手了
   view = new BoardView("board", handleHumanVsAI);
 
   step = "playing";
-  syncUI(); // 初始渲染
+  syncUI();
+
+  // 检查如果首个回合就是 AI (玩家选了白棋)，则立即启动 AI ---
+  if (engine.currentPlayer === "AI") {
+    runAIProcess();
+  }
 });

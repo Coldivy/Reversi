@@ -22,7 +22,7 @@ export class GameEngine {
     this.currentGrid[3][3] = this.currentGrid[4][4] = -1;
     this.currentGrid[3][4] = this.currentGrid[4][3] = 1;
     // 初始化先手，玩家先手
-    this._player = player;
+    this._player = 1;
     this.initialPlayer = player;
   }
 

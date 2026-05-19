@@ -4,7 +4,6 @@ from typing import List
 
 from core.board import Bitboard
 from ai.search import SearchEngine
-from ai.evaluator import Evaluator
 
 # 创建一个路由对象
 router = APIRouter()
@@ -28,10 +27,9 @@ async def get_ai_move(request: GameRequest):
 
     # 3. 调用 AI 搜索
     move, score = SearchEngine.get_best_move(
-        depth=5,
+        depth=8,
         player_bb=p_bb,
         opponent_bb=o_bb,
-        evaluator=Evaluator.simple_evaluate
     )
 
     if move is None:

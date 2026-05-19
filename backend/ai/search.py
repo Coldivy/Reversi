@@ -1,67 +1,96 @@
-from core.board import Bitboard
-from core import constants as c
+import platform
+import os
+import sys
+import ctypes
+
+
+# class Evaluator:
+#     # 按权重值分组的位掩码 (Hex 表示)
+#     # 每一行注释代表该权重在棋盘上覆盖的格子逻辑
+#     WEIGHT_MASKS = {
+#         100: 0x8100000000000081,  # 四个角 (A1, H1, A8, H8)
+#         -50: 0x0042000000004200,  # 角落内对角位 (B2, G2, B7, G7)
+#         -20: 0x4281000000008142,  # 靠近角落的边缘位
+#         10: 0x2400810000810024,  # 边缘及内层对应位
+#         5: 0x1800248181240018,  # 剩余边缘及内层位
+#         -2: 0x003C424242423C00,  # 靠近边缘的内层敏感区
+#         1: 0x0000184242180000,  # 中心区外围
+#         0: 0x0000001818000000  # 棋盘最中心四个格
+#     }
+#
+#     @staticmethod
+#     def simple_evaluate(player_bb: int, opponent_bb: int) -> float:
+#         score = 0
+#         # 使用 Python 3.10+ 的 int.bit_count()，这是内置的高性能实现
+#         for weight, mask in Evaluator.WEIGHT_MASKS.items():
+#             score += (player_bb & mask).bit_count() * weight
+#             score -= (opponent_bb & mask).bit_count() * weight
+#
+#         # 行动力优化：直接用 bit_count
+#         p_moves = Bitboard.get_legal_moves(player_bb, opponent_bb).bit_count()
+#         o_moves = Bitboard.get_legal_moves(opponent_bb, player_bb).bit_count()
+#         score += (p_moves - o_moves) * 5
+#         return float(score)
+
+
+# 1. 获取动态库的绝对路径
+current_dir = os.path.dirname(os.path.abspath(__file__))
+system_name = platform.system()
+
+if system_name == "Windows":
+    lib_name = "search.dll"
+else:
+    lib_name = "search.so"
+
+lib_path = os.path.join(current_dir, lib_name)
+
+# 2. 强制检查文件是否存在
+if not os.path.exists(lib_path):
+    # 打印出尝试搜索的路径，方便调试
+    print(f"CRITICAL ERROR: 找不到动态库文件!")
+    print(f"期待路径: {lib_path}")
+    print(f"当前目录下文件: {os.listdir(current_dir)}")
+    sys.exit(1)  # 直接停止程序，防止报 NameError
+
+# 3. 加载库
+try:
+    _lib = ctypes.CDLL(lib_path)
+    _lib.c_get_best_move.argtypes = [
+        ctypes.c_int,
+        ctypes.c_uint64,
+        ctypes.c_uint64,
+        ctypes.POINTER(ctypes.c_int)
+    ]
+    _lib.c_get_best_move.restype = ctypes.c_float
+except Exception as e:
+    print(f"CRITICAL ERROR: 加载动态库失败: {e}")
+    sys.exit(1)
 
 
 class SearchEngine:
     @staticmethod
-    def get_best_move(depth: int, player_bb: int, opponent_bb: int, evaluator):
+    def get_best_move(depth: int, player_bb: int, opponent_bb: int):
         """
-        供外部调用的入口：返回 (best_move, score)
+        API 与原版保持一致
+        返回 (best_move, score)
         """
-        # 调用核心搜索函数，初始 Alpha 为负无穷，Beta 为正无穷
-        score, move = SearchEngine._negamax(
-            depth, player_bb, opponent_bb, c.LOSS_SCORE, c.WIN_SCORE, evaluator)
-        return move, score
+        best_move = ctypes.c_int(-1)
+        # 调用 C 函数
+        score = _lib.c_get_best_move(
+            depth,
+            ctypes.c_uint64(player_bb),
+            ctypes.c_uint64(opponent_bb),
+            ctypes.byref(best_move)
+        )
 
-    @staticmethod
-    def _negamax(depth: int, player_bb: int, opponent_bb: int, alpha: float, beta: float, evaluator):
-        # 1. 终止条件
-        if depth == 0 or Bitboard.is_game_over(player_bb, opponent_bb):
-            return evaluator(player_bb, opponent_bb), None
-
-        legal_moves = Bitboard.get_legal_moves(player_bb, opponent_bb)
-
-        # 2. 处理“没棋下”的情况 (Pass)
-        if legal_moves == 0:
-            opp_moves = Bitboard.get_legal_moves(opponent_bb, player_bb)
-            if opp_moves == 0:  # 双方都没棋，游戏结束
-                # 假设 evaluator 在游戏结束时能返回很大/很小的分
-                return evaluator(player_bb, opponent_bb), None
-
-            # 只有自己没棋下，交换对手，深度减1，分数取负
-            score, _ = SearchEngine._negamax(
-                depth - 1, opponent_bb, player_bb, -beta, -alpha, evaluator)
-            return -score, None
-
-        # 3. 正常遍历落子点
-        best_score = c.LOSS_SCORE
-        best_move = None
-
-        for i in range(64):
-            if (legal_moves >> i) & 1:
-                # 模拟落子
-                new_player_bb, new_opponent_bb = Bitboard.make_move(
-                    player_bb, opponent_bb, i)
-
-                # 递归：Alpha-Beta 的范围翻转
-                score, _ = SearchEngine._negamax(
-                    depth - 1, new_opponent_bb, new_player_bb, -beta, -alpha, evaluator)
-                score = -score
-
-                if score > best_score:
-                    best_score = score
-                    best_move = i
-
-                # --- Alpha-Beta 剪枝 ---
-                alpha = max(alpha, score)
-                if alpha >= beta:
-                    break
-
-        return best_score, best_move
+        move_val = best_move.value
+        if move_val == -1:
+            return None, float(score)
+        return move_val, float(score)
 
     # 纯Minimax，不剪枝
     # @staticmethod
-    # def minimax_search(depth: int, player_bb: int, opponent_bb: int, evaluator):
+    # def minimax_search(depth: int, player_bb: int, opponent_bb: int):
     #     if depth == 0 or Bitboard.is_game_over(player_bb, opponent_bb):
     #         return evaluator(player_bb, opponent_bb), None
     #
@@ -71,7 +100,7 @@ class SearchEngine:
     #         opp_moves = Bitboard.get_legal_moves(opponent_bb, player_bb)
     #
     #         if opp_moves == 0:  # 双方都没棋，游戏结束
-    #             return evaluator(player_bb, opponent_bb), None
+    #             return Evaluator.simple_evaluate(player_bb, opponent_bb), None
     #
     #         # 计算交换手分数
     #         score, _ = SearchEngine.minimax_search(

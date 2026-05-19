@@ -131,10 +131,6 @@ class Bitboard:
         return True
 
 
-# 假设你的 Bitboard 类代码在这里
-# class Bitboard: ...
-
-
 # class TestBitboard(unittest.TestCase):
 #
 #     def setUp(self):
