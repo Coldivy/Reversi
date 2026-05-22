@@ -59,10 +59,13 @@ void make_move(uint64 P, uint64 O, int move, uint64 *newP, uint64 *newO) {
   FLIP_DIR(<< 1, mask)
   FLIP_DIR(>> 1, mask)
   FLIP_DIR(<< 8, O)
-  FLIP_DIR(>> 8, O) FLIP_DIR(<< 7, mask) FLIP_DIR(>> 9, mask)
-      FLIP_DIR(<< 9, mask) FLIP_DIR(>> 7, mask)
+  FLIP_DIR(>> 8, O)
+  FLIP_DIR(<< 7, mask)
+  FLIP_DIR(>> 9, mask)
+  FLIP_DIR(<< 9, mask)
+  FLIP_DIR(>> 7, mask)
 
-          *newP = P | m | flipped;
+  *newP = P | m | flipped;
   *newO = O & ~flipped;
 }
 
@@ -95,22 +98,85 @@ float negamax(int depth, uint64 P, uint64 O, float alpha, float beta,
   float best_score = LOSS_SCORE;
   int local_best_move = -1;
 
-  for (int i = 0; i < 64; i++) {
-    if ((moves >> i) & 1) {
-      uint64 nP, nO;
-      make_move(P, O, i, &nP, &nO);
-      float score = -negamax(depth - 1, nO, nP, -beta, -alpha, NULL);
+  uint64 temp_moves = moves;
+  while (temp_moves) {
+    // 获取最低位的 1 对应的棋盘索引 (0-63)
+    int i = __builtin_ctzll(temp_moves);
 
-      if (score > best_score) {
-        best_score = score;
-        local_best_move = i;
-      }
-      if (score > alpha)
-        alpha = score;
-      if (alpha >= beta)
-        break;
+    uint64 nP, nO;
+    make_move(P, O, i, &nP, &nO);
+    float score = -negamax(depth - 1, nO, nP, -beta, -alpha, NULL);
+
+    if (score > best_score) {
+      best_score = score;
+      local_best_move = i;
     }
+    if (score > alpha)
+      alpha = score;
+    if (alpha >= beta)
+      break; // Alpha-Beta 剪枝
+
+    // 清除最低位的 1，进入下一次迭代
+    temp_moves &= temp_moves - 1;
   }
+
+  if (best_move)
+    *best_move = local_best_move;
+  return best_score;
+}
+
+// 终局完美搜索部分
+// 终局叶子节点评估：计算纯子数差
+// 根据标准黑白棋规则，如果一方子被吃光，另一方获得棋盘上所有的剩余空格
+float evaluate_exact_score(uint64 P, uint64 O) {
+  int p_cnt = popcount(P);
+  int o_cnt = popcount(O);
+  if (p_cnt == 0)
+    return -64.0f; // 己方被剃光头
+  if (o_cnt == 0)
+    return 64.0f; // 对方被剃光头
+  return (float)(p_cnt - o_cnt);
+}
+
+// 终局递归 Solver：没有深度限制，直达游戏结束
+float solve(uint64 P, uint64 O, float alpha, float beta, int *best_move) {
+  uint64 moves = get_legal_moves(P, O);
+
+  // 如果自己没棋下
+  if (moves == 0) {
+    // 如果对手也没棋下，说明游戏彻底结束
+    if (get_legal_moves(O, P) == 0) {
+      return evaluate_exact_score(P, O);
+    }
+    // 只有自己 Pass，交换棋权，不扣减步数（继续搜索直到终局）
+    return -solve(O, P, -beta, -alpha, NULL);
+  }
+
+  float best_score = LOSS_SCORE;
+  int local_best_move = -1;
+
+  uint64 temp_moves = moves;
+  while (temp_moves) {
+    int i = __builtin_ctzll(temp_moves);
+
+    uint64 nP, nO;
+    make_move(P, O, i, &nP, &nO);
+
+    // 递归，没有 depth - 1 限制
+    float score = -solve(nO, nP, -beta, -alpha, NULL);
+
+    if (score > best_score) {
+      best_score = score;
+      local_best_move = i;
+    }
+    if (score > alpha)
+      alpha = score;
+    if (alpha >= beta)
+      break; // Alpha-Beta 剪枝
+
+    temp_moves &= temp_moves - 1;
+  }
+
   if (best_move)
     *best_move = local_best_move;
   return best_score;
@@ -118,7 +184,19 @@ float negamax(int depth, uint64 P, uint64 O, float alpha, float beta,
 
 // 导出的接口函数
 // 返回值是 score，通过指针返回 best_move
+
 float c_get_best_move(int depth, uint64 player_bb, uint64 opponent_bb,
                       int *move) {
+  // 1. 计算棋盘上的空格数
+  int occupied_squares = popcount(player_bb | opponent_bb);
+  int empty_squares = 64 - occupied_squares;
+
+  // 2. 如果剩余空格 <= 12，自动切换到“终局完美搜索”
+  if (empty_squares <= 12) {
+    // 使用 solve 替代 negamax，初始分数边界依旧是 LOSS_SCORE 到 WIN_SCORE
+    return solve(player_bb, opponent_bb, LOSS_SCORE, WIN_SCORE, move);
+  }
+
+  // 3. 否则，使用常规的启发式深度限制搜索
   return negamax(depth, player_bb, opponent_bb, LOSS_SCORE, WIN_SCORE, move);
 }

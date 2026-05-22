@@ -27,7 +27,7 @@ async def get_ai_move(request: GameRequest):
 
     # 3. 调用 AI 搜索
     move, score = SearchEngine.get_best_move(
-        depth=8,
+        depth=10,
         player_bb=p_bb,
         opponent_bb=o_bb,
     )

@@ -243,46 +243,76 @@ body {
   width: 90%;
 }
 
+/* 标题 */
 #choose-panel p {
-  margin: 0 0 30px 0;
-  font-size: 20px;
-  font-weight: 500;
-  color: #333;
-  line-height: 1.4;
+  margin: 0 0 20px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1a1a1a;
+  text-align: center;
 }
 
-/* 两个棋子选项按钮 */
-#btn-black,
-#btn-white {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 70px;
-  height: 70px;
-  border-radius: 50%;
-  font-size: 18px;
-  font-weight: bold;
+/* 输入项表单 */
+.form {
+  display: flex;
+  flex-direction: column-reverse; /* 使 HTML 中写在下方的 label 渲染在 input 上方 */
+  margin-bottom: 14px;
+  gap: 4px;
+}
+
+/* 输入框 */
+.form-input {
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background-color: #fafafa;
+  color: #333333;
+  font-size: 13px;
+  box-sizing: border-box;
+  outline: none;
+}
+
+/* 输入框聚焦状态：无渐变，瞬间切换 */
+.form-input:focus {
+  border-color: #007bff;
+  background-color: #ffffff;
+}
+
+/* 标签文本 */
+.form-label {
+  font-size: 12px;
+  color: #666666;
+  font-weight: 500;
+  align-self: self-start;
+}
+
+/* 开始按钮 */
+#start-btn {
+  background-color: #007bff;
+  color: #ffffff;
+  text-align: center;
+  height: 38px;
+  line-height: 38px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
-  margin: 0 15px;
-  transition:
-    transform 0.2s,
-    box-shadow 0.2s;
+  margin-top: 20px;
   user-select: none;
 }
 
-#btn-black:hover,
-#btn-white:hover {
-  transform: scale(1.08);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+/* 按钮点击/悬停状态：瞬间切换 */
+#start-btn:hover {
+  background-color: #0069d9;
 }
 
-#btn-black {
-  background: #2d2d2d;
-  color: white;
+#start-btn:active {
+  background-color: #0056b3;
 }
 
-#btn-white {
-  background: #f5f5f5;
-  color: #333;
-  border: 2px solid #ccc;
+#remarks {
+  font-size: 16px;
+  color: #444444;
 }

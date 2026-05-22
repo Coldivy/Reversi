@@ -1,10 +1,25 @@
-export function showChoosePanel(onChoose: (playerColor: 1 | -1) => void) {
+export function showChoosePanel(
+  onChoose: (blackUrl: string, whiteUrl: string) => void,
+) {
   const panel = document.createElement("div");
   panel.id = "choose-panel";
   panel.innerHTML = `
-<p>请选择玩家（人类）棋子颜色<p>
-  <div id = "btn-black">黑</div>
-  <div id = "btn-white">白</div>
+<p>请选择玩家<p>
+  <form id = "black-input" class = "form">
+    <input type = "url" id = "black-url" class = "form-input">
+    <label for = "black-url" class = "form-label">
+      Black's api url
+    </label>
+  </form>
+  <form id = "white-input" class = "form">
+    <input type = "url" id = "white-url" class = "form-input">
+    <label for ="white-url" class = "form-label">
+      White's api url
+    </label>
+  </form>
+  <div id = "start-btn">开始</div>
+  <br>
+  <div id = "remarks">留空为人类玩家手动点击<br>内置AI输入"/api/ai-move"</div>
 `;
 
   const overlay = document.createElement("div");
@@ -12,16 +27,15 @@ export function showChoosePanel(onChoose: (playerColor: 1 | -1) => void) {
   document.body.appendChild(overlay);
   overlay.appendChild(panel);
 
-  const btnBlack = document.getElementById("btn-black") as HTMLDivElement;
-  const btnWhite = document.getElementById("btn-white") as HTMLDivElement;
+  const startBtn = document.getElementById("start-btn") as HTMLDivElement;
+  const blackInput = document.getElementById("black-url") as HTMLInputElement;
+  const whiteInput = document.getElementById("white-url") as HTMLInputElement;
 
-  btnBlack.addEventListener("click", () => {
+  startBtn.addEventListener("click", () => {
+    const blackUrl = blackInput.value.trim();
+    const whiteUrl = whiteInput.value.trim();
+    onChoose(blackUrl, whiteUrl);
     cleanup();
-    onChoose(1);
-  });
-  btnWhite.addEventListener("click", () => {
-    cleanup();
-    onChoose(-1);
   });
 
   function cleanup() {

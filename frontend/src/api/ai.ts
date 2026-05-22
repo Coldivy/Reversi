@@ -4,22 +4,21 @@ export interface Point {
   c: number;
 }
 
-// Python 后端地址 (如果是本地开发，通常是 5000 或 8000 端口)
-const AI_API_URL = "/api/ai-move";
-
 /**
  * 向 Python 后端请求 AI 的下一步落子
+ * @param apiUrl 当前AI接口地址
  * @param grid 当前的 8x8 棋盘数组
  * @param aiPlayerValue AI 的玩家值（默认 -1 代表白棋）
  * @returns 返回一个 Promise，解析为 AI 决定的坐标 {r, c}
  */
 export async function fetchAIMove(
+  apiUrl: string,
   grid: number[][],
   aiPlayerValue: number,
 ): Promise<Point> {
   try {
     // 发起 POST 请求
-    const response = await fetch(AI_API_URL, {
+    const response = await fetch(apiUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

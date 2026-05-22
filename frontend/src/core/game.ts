@@ -12,7 +12,7 @@ export interface GameScore {
 }
 
 export class GameEngine {
-  public _player: PlayerValue;
+  private _player: PlayerValue;
   private initialPlayer: PlayerValue;
   private currentGrid: number[][];
 
@@ -21,8 +21,7 @@ export class GameEngine {
     this.currentGrid = Array.from({ length: 8 }, () => Array(8).fill(0));
     this.currentGrid[3][3] = this.currentGrid[4][4] = -1;
     this.currentGrid[3][4] = this.currentGrid[4][3] = 1;
-    // 初始化先手，玩家先手
-    this._player = 1;
+    this._player = 1; // 黑子先手
     this.initialPlayer = player;
   }
 
@@ -94,6 +93,10 @@ export class GameEngine {
 
   public get currentPlayer(): PlayerName {
     return this._player === this.initialPlayer ? "Player" : "AI";
+  }
+
+  public get currentPlayerValue(): PlayerValue {
+    return this._player;
   }
 
   public makeMove(r: number, c: number): boolean {
