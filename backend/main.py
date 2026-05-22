@@ -10,7 +10,7 @@ import uvicorn
 app = FastAPI(title="Reversi AI Backend")
 
 
-# 2. 注册路由
+# 注册路由
 app.include_router(game_router, prefix="/api")
 
 # 挂载静态文件目录
@@ -18,7 +18,7 @@ app.include_router(game_router, prefix="/api")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
-# 3. 定义根路径返回前端页面
+# 定义根路径返回前端页面
 @app.get("/")
 async def read_index():
     return FileResponse(os.path.join("static", "index.html"))
