@@ -2,7 +2,7 @@ import { BoardView } from "./ui/board";
 import { MessageView } from "./ui/msg";
 import { showChoosePanel } from "./ui/choose";
 import { GameEngine } from "./core/game";
-import { fetchAIMove } from "./api/ai";
+import { fetchAIMove, fetchResetAI } from "./api/ai";
 
 // 定义游戏状态
 type GameStep = "choose" | "playing" | "end";
@@ -128,6 +128,19 @@ showChoosePanel((blackUrl, whiteUrl) => {
   blackApiUrl = blackUrl;
   whiteApiUrl = whiteUrl;
   step = "playing";
+
+  // 新局开始前，通知配置了 API 链接的后端重置置换表
+  if (blackApiUrl) {
+    fetchResetAI(blackApiUrl).catch((err) =>
+      console.error("重置黑棋AI失败:", err),
+    );
+  }
+  // 如果白棋是另一个后端 AI 链接，也同样通知重置
+  if (whiteApiUrl && whiteApiUrl !== blackApiUrl) {
+    fetchResetAI(whiteApiUrl).catch((err) =>
+      console.error("重置白棋AI失败:", err),
+    );
+  }
 
   engine = new GameEngine(1); // 默认黑棋先手
 

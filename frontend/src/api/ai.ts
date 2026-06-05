@@ -50,3 +50,30 @@ export async function fetchAIMove(
     throw error;
   }
 }
+
+/**
+ * 告知后端重置 AI 引擎（清空上一局置换表）
+ * @param apiUrl 当前AI接口地址（例如：http://127.0.0.1:8000/api）
+ */
+export async function fetchResetAI(apiUrl: string): Promise<void> {
+  try {
+    // 假设 apiUrl 传入的是 "http://127.0.0.1:8000/api/ai-move"
+    // 我们将其替换为 "http://127.0.0.1:8000/api/init"
+    const initUrl = apiUrl.replace("/ai-move", "/init");
+
+    const response = await fetch(initUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      console.warn("通知 AI 引擎重置失败，可能未实现重置接口");
+    } else {
+      console.log("AI 引擎重置成功，置换表已清空");
+    }
+  } catch (error) {
+    console.error("重置 AI 引擎通信异常:", error);
+  }
+}
