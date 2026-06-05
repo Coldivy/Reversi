@@ -18,16 +18,19 @@ class GameRequest(BaseModel):
 
 @router.post("/ai-move")
 async def get_ai_move(request: GameRequest):
-    # 1. 转换数据
+    """
+    接收前端获取ai走法请求
+    """
+    # 转换数据
     black_bb, white_bb = Bitboard.from_array(request.board)
 
-    # 2. 确定搜索方
+    # 确定搜索方
     p_bb, o_bb = (black_bb, white_bb) if request.player == 1 else (
         white_bb, black_bb)
 
-    # 3. 调用 AI 搜索
+    # 调用 AI 搜索
     move, score = SearchEngine.get_best_move(
-        depth=10,
+        depth=12,
         player_bb=p_bb,
         opponent_bb=o_bb,
     )
@@ -36,3 +39,15 @@ async def get_ai_move(request: GameRequest):
         return {"r": -1, "c": -1}
 
     return {"r": move // 8, "c": move % 8}
+
+
+@router.post("/init")
+async def init_ai_engine():
+    """
+    接收前端重置请求，清空置换表缓存
+    """
+    try:
+        SearchEngine.init_engine()
+        return {"status": "success", "message": "置换表已重置"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}

@@ -55,6 +55,7 @@ if not os.path.exists(lib_path):
 # 3. 加载库
 try:
     _lib = ctypes.CDLL(lib_path)
+    # 注册c_get_best_move函数
     _lib.c_get_best_move.argtypes = [
         ctypes.c_int,
         ctypes.c_uint64,
@@ -62,6 +63,11 @@ try:
         ctypes.POINTER(ctypes.c_int)
     ]
     _lib.c_get_best_move.restype = ctypes.c_float
+
+    # 注册初始化函数 c_init_search
+    _lib.c_init_search.argtypes = []
+    _lib.c_init_search.restype = None
+
 except Exception as e:
     print(f"CRITICAL ERROR: 加载动态库失败: {e}")
     sys.exit(1)
@@ -69,9 +75,16 @@ except Exception as e:
 
 class SearchEngine:
     @staticmethod
+    def init_engine():
+        """
+        初始化搜索引擎（生成随机数表，并清空置换表缓存）。
+        应该在程序启动时，以及每局新游戏开始前调用一次。
+        """
+        _lib.c_init_search()
+
+    @staticmethod
     def get_best_move(depth: int, player_bb: int, opponent_bb: int):
         """
-        API 与原版保持一致
         返回 (best_move, score)
         """
         best_move = ctypes.c_int(-1)
@@ -88,38 +101,5 @@ class SearchEngine:
             return None, float(score)
         return move_val, float(score)
 
-    # 纯Minimax，不剪枝
-    # @staticmethod
-    # def minimax_search(depth: int, player_bb: int, opponent_bb: int):
-    #     if depth == 0 or Bitboard.is_game_over(player_bb, opponent_bb):
-    #         return evaluator(player_bb, opponent_bb), None
-    #
-    #     legal_moves = Bitboard.get_legal_moves(player_bb, opponent_bb)
-    #
-    #     if legal_moves == 0:
-    #         opp_moves = Bitboard.get_legal_moves(opponent_bb, player_bb)
-    #
-    #         if opp_moves == 0:  # 双方都没棋，游戏结束
-    #             return Evaluator.simple_evaluate(player_bb, opponent_bb), None
-    #
-    #         # 计算交换手分数
-    #         score, _ = SearchEngine.minimax_search(
-    #             depth-1, opponent_bb, player_bb, evaluator)
-    #         return -score, None
-    #
-    #     best_score = c.LOSS_SCORE
-    #     best_move = None
-    #
-    #     for i in range(64):
-    #         if (legal_moves >> i) & 1:
-    #             new_player_bb, new_opponent_bb = Bitboard.make_move(
-    #                 player_bb, opponent_bb, i)
-    #             temp_score, _ = SearchEngine.minimax_search(
-    #                 depth-1, new_opponent_bb, new_player_bb, evaluator)
-    #             temp_score = -temp_score
-    #
-    #             if temp_score > best_score:
-    #                 best_score = temp_score
-    #                 best_move = i
-    #
-    #     return best_score, best_move
+
+SearchEngine.init_engine()
