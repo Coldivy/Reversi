@@ -52,14 +52,59 @@ export async function fetchAIMove(
 }
 
 /**
+ * 向 Python 后端请求 AI 的下一步落子（限时搜索版本）
+ * @param apiUrl 当前AI接口地址（如 http://127.0.0.1:8000/api/ai-move-timelimit）
+ * @param grid 当前的 8x8 棋盘数组
+ * @param aiPlayerValue AI 的玩家值（默认 -1 代表白棋）
+ * @param timeLimitMs 时间上限（毫秒）
+ * @returns 返回一个 Promise，解析为 AI 决定的坐标 {r, c, depth}
+ */
+export async function fetchAIMoveTimed(
+  apiUrl: string,
+  grid: number[][],
+  aiPlayerValue: number,
+  timeLimitMs: number,
+): Promise<{ r: number; c: number; depth: number }> {
+  try {
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        board: grid,
+        player: aiPlayerValue,
+        time_limit_ms: timeLimitMs,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`后端请求失败，状态码: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    if (typeof data.r !== "number" || typeof data.c !== "number") {
+      throw new Error("后端返回的数据格式不正确，期望 {r, c}");
+    }
+
+    return { r: data.r, c: data.c, depth: data.depth ?? 0 };
+  } catch (error) {
+    console.error("AI 限时搜索接口通信报错:", error);
+    throw error;
+  }
+}
+
+/**
  * 告知后端重置 AI 引擎（清空上一局置换表）
  * @param apiUrl 当前AI接口地址（例如：http://127.0.0.1:8000/api）
  */
 export async function fetchResetAI(apiUrl: string): Promise<void> {
   try {
-    // 假设 apiUrl 传入的是 "http://127.0.0.1:8000/api/ai-move"
-    // 我们将其替换为 "http://127.0.0.1:8000/api/init"
-    const initUrl = apiUrl.replace("/ai-move", "/init");
+    // 将 "/ai-move" 或 "/ai-move-timelimit" 替换为 "/init"
+    const initUrl = apiUrl
+      .replace("/ai-move-timelimit", "/init")
+      .replace("/ai-move", "/init");
 
     const response = await fetch(initUrl, {
       method: "POST",

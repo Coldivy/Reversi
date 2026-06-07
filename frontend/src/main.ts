@@ -2,7 +2,7 @@ import { BoardView } from "./ui/board";
 import { MessageView } from "./ui/msg";
 import { showChoosePanel } from "./ui/choose";
 import { GameEngine } from "./core/game";
-import { fetchAIMove, fetchResetAI } from "./api/ai";
+import { fetchAIMove, fetchAIMoveTimed, fetchResetAI } from "./api/ai";
 
 // 定义游戏状态
 type GameStep = "choose" | "playing" | "end";
@@ -83,10 +83,14 @@ async function executeAIMove(apiUrl: string, playerValue: 1 | -1) {
     );
 
     const currentGrid = JSON.parse(JSON.stringify(engine.getGrid()));
-    const aiMove = await fetchAIMove(apiUrl, currentGrid, playerValue);
+    // 根据链接自动匹配搜索模式：含 timelimit → 限时搜索，否则 → 固定深度 14
+    const isTimed = apiUrl.includes("ai-move-timelimit");
+    const aiMove = isTimed
+      ? await fetchAIMoveTimed(apiUrl, currentGrid, playerValue, 3000)
+      : await fetchAIMove(apiUrl, currentGrid, playerValue);
 
     if (aiMove.r !== -1) {
-      await new Promise((resolve) => setTimeout(resolve, 600)); // 视觉延迟
+      // await new Promise((resolve) => setTimeout(resolve, 600)); // 视觉延迟
       const aiSuccess = engine.makeMove(aiMove.r, aiMove.c);
       if (aiSuccess) {
         syncUI();
@@ -124,22 +128,26 @@ function executePlayerMove(r: number, c: number) {
 }
 
 // 选择面板与初始化
-showChoosePanel((blackUrl, whiteUrl) => {
+showChoosePanel(async (blackUrl, whiteUrl) => {
   blackApiUrl = blackUrl;
   whiteApiUrl = whiteUrl;
   step = "playing";
 
   // 新局开始前，通知配置了 API 链接的后端重置置换表
   if (blackApiUrl) {
-    fetchResetAI(blackApiUrl).catch((err) =>
-      console.error("重置黑棋AI失败:", err),
-    );
+    try {
+      await fetchResetAI(blackApiUrl);
+    } catch (err) {
+      console.error("重置黑棋AI失败:", err);
+    }
   }
   // 如果白棋是另一个后端 AI 链接，也同样通知重置
   if (whiteApiUrl && whiteApiUrl !== blackApiUrl) {
-    fetchResetAI(whiteApiUrl).catch((err) =>
-      console.error("重置白棋AI失败:", err),
-    );
+    try {
+      await fetchResetAI(whiteApiUrl);
+    } catch (err) {
+      console.error("重置白棋AI失败:", err);
+    }
   }
 
   engine = new GameEngine(1); // 默认黑棋先手

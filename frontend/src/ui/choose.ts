@@ -19,7 +19,7 @@ export function showChoosePanel(
   </form>
   <div id = "start-btn">开始</div>
   <br>
-  <div id = "remarks">留空为人类玩家手动点击<br>内置AI输入"/api/ai-move"</div>
+  <div id = "remarks">留空为人类玩家手动点击<br>内置AI输入"/api/ai-move"<br>固定时间搜索AI输入"/api/ai-move-timelimit"（默认控制在3秒内）<br>注意：为了节省内存，简洁化代码，内置AI使用同一置换表。<br><b>所以不要同时让深度固定AI与限时AI进行对战</b>，会污染置换表导致走法变形，无法反映真实强度！</div>
 `;
 
   const overlay = document.createElement("div");

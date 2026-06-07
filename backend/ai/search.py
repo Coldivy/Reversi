@@ -62,11 +62,21 @@ try:
         ctypes.c_uint64,
         ctypes.POINTER(ctypes.c_int)
     ]
-    _lib.c_get_best_move.restype = ctypes.c_float
+    _lib.c_get_best_move.restype = ctypes.c_int
 
     # 注册初始化函数 c_init_search
     _lib.c_init_search.argtypes = []
     _lib.c_init_search.restype = None
+
+    # 注册限时搜索函数 c_get_best_move_timed
+    _lib.c_get_best_move_timed.argtypes = [
+        ctypes.c_int,                # time_limit_ms
+        ctypes.c_uint64,             # player_bb
+        ctypes.c_uint64,             # opponent_bb
+        ctypes.POINTER(ctypes.c_int),# *move
+        ctypes.POINTER(ctypes.c_int) # *depth_searched
+    ]
+    _lib.c_get_best_move_timed.restype = ctypes.c_int
 
 except Exception as e:
     print(f"CRITICAL ERROR: 加载动态库失败: {e}")
@@ -98,8 +108,31 @@ class SearchEngine:
 
         move_val = best_move.value
         if move_val == -1:
-            return None, float(score)
-        return move_val, float(score)
+            return None, int(score)
+        return move_val, int(score)
+
+    @staticmethod
+    def get_best_move_timed(time_limit_ms: int,
+                            player_bb: int, opponent_bb: int):
+        """
+        在指定时间内尽可能深地搜索。
+        time_limit_ms: 时间上限（毫秒），<=0 表示不限时。
+        返回 (best_move, score, depth_reached)
+        """
+        best_move = ctypes.c_int(-1)
+        depth_searched = ctypes.c_int(0)
+        score = _lib.c_get_best_move_timed(
+            ctypes.c_int(time_limit_ms),
+            ctypes.c_uint64(player_bb),
+            ctypes.c_uint64(opponent_bb),
+            ctypes.byref(best_move),
+            ctypes.byref(depth_searched)
+        )
+
+        move_val = best_move.value
+        if move_val == -1:
+            return None, int(score), depth_searched.value
+        return move_val, int(score), depth_searched.value
 
 
 SearchEngine.init_engine()

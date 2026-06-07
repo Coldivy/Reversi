@@ -239,8 +239,9 @@ body {
   text-align: center;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.2);
   font-family: sans-serif;
-  max-width: 320px;
-  width: 90%;
+  min-width: 320px;
+  width: fit-content;
+  max-width: 40vw;
 }
 
 /* 标题 */
