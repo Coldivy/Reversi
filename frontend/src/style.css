@@ -235,33 +235,159 @@ body {
   background: #ffffff;
   border: none;
   border-radius: 20px;
-  padding: 40px 50px;
+  padding: 36px 44px;
   text-align: center;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.2);
   font-family: sans-serif;
-  min-width: 320px;
+  min-width: 560px;
   width: fit-content;
-  max-width: 40vw;
+  max-width: 70vw;
 }
 
 /* 标题 */
-#choose-panel p {
-  margin: 0 0 20px 0;
-  font-size: 16px;
+#choose-panel .choose-title {
+  margin: 0 0 24px 0;
+  font-size: 18px;
   font-weight: 600;
   color: #1a1a1a;
   text-align: center;
 }
 
-/* 输入项表单 */
+/* ── 双列布局 ── */
+.choose-sides {
+  display: flex;
+  gap: 28px;
+  margin-bottom: 24px;
+  justify-content: center;
+}
+
+.choose-side {
+  flex: 1;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 16px;
+  border: 1px solid #e8e8e8;
+  border-radius: 12px;
+  background: #fafbfc;
+}
+
+/* ── 侧标头 ── */
+.side-header {
+  font-size: 15px;
+  font-weight: 600;
+  color: #333;
+  text-align: center;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #e8e8e8;
+}
+
+.side-header-black { color: #222; }
+.side-header-white { color: #777; }
+
+/* ── URL 输入 ── */
+.side-url {
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background-color: #fafafa;
+  color: #333333;
+  font-size: 13px;
+  box-sizing: border-box;
+  outline: none;
+}
+
+.side-url:focus {
+  border-color: #007bff;
+  background-color: #ffffff;
+}
+
+/* ── 下拉选择器 ── */
+.engine-type,
+.param-strategy {
+  width: 100%;
+  height: 36px;
+  padding: 0 8px;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background-color: #fafafa;
+  color: #333333;
+  font-size: 13px;
+  box-sizing: border-box;
+  outline: none;
+  cursor: pointer;
+}
+
+.engine-type:focus,
+.param-strategy:focus {
+  border-color: #007bff;
+  background-color: #ffffff;
+}
+
+/* ── 参数行 ── */
+.param-group {
+  /* 由 JS 动态填充 */
+}
+
+.param-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.param-label {
+  font-size: 12px;
+  color: #666666;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.param-value {
+  flex: 1;
+  height: 36px;
+  padding: 0 8px;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background-color: #fafafa;
+  color: #333333;
+  font-size: 13px;
+  box-sizing: border-box;
+  outline: none;
+  text-align: right;
+}
+
+.param-value:focus {
+  border-color: #007bff;
+  background-color: #ffffff;
+}
+
+/* select 型参数：覆盖 number input 专属样式 */
+.param-select {
+  text-align: left;
+  cursor: pointer;
+  padding: 0 6px;
+  appearance: auto;
+}
+
+.param-unit {
+  font-size: 12px;
+  color: #888888;
+  white-space: nowrap;
+  min-width: 24px;
+  text-align: left;
+}
+
+/* ── 旧表单样式（保留兼容） ── */
 .form {
   display: flex;
-  flex-direction: column-reverse; /* 使 HTML 中写在下方的 label 渲染在 input 上方 */
+  flex-direction: column-reverse;
   margin-bottom: 14px;
   gap: 4px;
 }
 
-/* 输入框 */
 .form-input {
   width: 100%;
   height: 36px;
@@ -275,13 +401,11 @@ body {
   outline: none;
 }
 
-/* 输入框聚焦状态：无渐变，瞬间切换 */
 .form-input:focus {
   border-color: #007bff;
   background-color: #ffffff;
 }
 
-/* 标签文本 */
 .form-label {
   font-size: 12px;
   color: #666666;

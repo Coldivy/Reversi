@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from api.routes import router as game_router
 from fastapi.responses import FileResponse
@@ -8,6 +9,15 @@ from threading import Timer
 import uvicorn
 
 app = FastAPI(title="Reversi AI Backend")
+
+# ── CORS 中间件（允许来自任意来源的前端请求） ──
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # 注册路由
