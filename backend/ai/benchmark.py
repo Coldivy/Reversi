@@ -79,6 +79,14 @@ QUICK_DEPTHS = {
 SEARCH_TIMEOUT_S = 10.0
 SEARCH_TIMEOUT_MS = int(SEARCH_TIMEOUT_S * 1000)
 
+# MCTS iteration levels (analogous to depths for Negamax engines)
+MCTS_ITER_LEVELS = [100, 500, 1000, 5000, 10000, 20000, 50000, 100000]
+
+# MCTS runs per test point (to measure stochastic consistency)
+MCTS_REPEATS = 3
+
+Board8x8 = (ctypes.c_int * 8) * 8
+
 
 # =====================================================================
 #  Engine wrapper
@@ -192,6 +200,88 @@ class Engine:
             ctypes.byref(depth_searched),
         )
         return best_move.value, int(score), depth_searched.value
+
+
+# =====================================================================
+#  MCTS Engine wrapper
+# =====================================================================
+
+class MCTSEngine:
+    """Wraps search_mct.dll (MCTS engine) for benchmarking.
+
+    Unlike the Negamax-based engines, MCTS:
+      • Uses mcts_search(board[8][8], player, *x, *y, iterations) instead of c_get_best_move
+      • Is stochastic — same position may yield different moves
+      • Uses 2D board arrays (0=empty, 1=black, 2=white) instead of bitboards
+    """
+
+    def __init__(self, lib_name: str = "search_mct"):
+        system = platform.system()
+        ext = ".dll" if system == "Windows" else ".so"
+        lib_path = os.path.join(_get_lib_dir(), lib_name + ext)
+        if not os.path.exists(lib_path):
+            raise FileNotFoundError(f"MCTS library not found: {lib_path}")
+
+        self.lib_name = lib_name
+        self.lib = ctypes.CDLL(lib_path)
+
+        # mcts_init_seed()
+        self.lib.mcts_init_seed.argtypes = []
+        self.lib.mcts_init_seed.restype = None
+
+        # mcts_search(int board[8][8], int player, int *out_x, int *out_y, int iterations)
+        self.lib.mcts_search.argtypes = [
+            Board8x8,
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.c_int,
+        ]
+        self.lib.mcts_search.restype = None
+
+        self.init()
+
+    def init(self):
+        self.lib.mcts_init_seed()
+
+    def search(self, iterations: int, P: int, O: int) -> Tuple[int, int]:
+        """Run MCTS search. P/O are bitboards as stored in TEST_POSITIONS.
+        Returns (move_index, score — always 0 for MCTS).
+        """
+        board = self._bitboards_to_array(P, O)
+        occupied = (P | O).bit_count()
+        player = 1 if occupied % 2 == 0 else 2  # 1=black, 2=white
+
+        out_x = ctypes.c_int(-1)
+        out_y = ctypes.c_int(-1)
+
+        self.lib.mcts_search(
+            board,
+            ctypes.c_int(player),
+            ctypes.byref(out_x),
+            ctypes.byref(out_y),
+            ctypes.c_int(iterations),
+        )
+
+        if out_x.value < 0:
+            return -1, 0
+        return out_x.value * 8 + out_y.value, 0
+
+    @staticmethod
+    def _bitboards_to_array(P: int, O: int) -> Board8x8:
+        """Convert black/white bitboards to 8x8 array (0=empty, 1=black, 2=white)."""
+        board = Board8x8()
+        for r in range(8):
+            row = board[r]
+            for c in range(8):
+                idx = r * 8 + c
+                if (P >> idx) & 1:
+                    row[c] = 1
+                elif (O >> idx) & 1:
+                    row[c] = 2
+                else:
+                    row[c] = 0
+        return board
 
 
 def create_all_engines() -> Dict[str, Engine]:
@@ -654,6 +744,193 @@ def run_head_to_head(engines: Dict[str, Engine],
 
 
 # =====================================================================
+#  MCTS benchmark
+# =====================================================================
+
+def run_mcts_benchmark(engine: MCTSEngine,
+                       positions: List[Dict],
+                       iter_levels: List[int] = MCTS_ITER_LEVELS,
+                       repeats: int = MCTS_REPEATS,
+                       ) -> List[Dict]:
+    """Benchmark MCTS at various iteration counts.
+
+    Each (position, iteration) combination is run `repeats` times
+    to measure stochastic consistency.
+    """
+    results = []
+
+    for pos in positions:
+        for iters in iter_levels:
+            moves_seen: Dict[int, int] = {}
+            times = []
+
+            for run_idx in range(repeats):
+                engine.init()
+                t0 = time.perf_counter()
+                move, score = engine.search(iters, pos["P"], pos["O"])
+                t1 = time.perf_counter()
+                elapsed_s = t1 - t0
+
+                moves_seen[move] = moves_seen.get(move, 0) + 1
+                times.append(elapsed_s)
+
+                print(
+                    f"  [mcts] iters={iters:6d} "
+                    f"pos={pos['name']:10s} "
+                    f"run={run_idx+1}/{repeats} "
+                    f"move={move_to_algebraic(move):4s} "
+                    f"time={fmt_time(elapsed_s, False)}"
+                )
+
+            # Determine most common move
+            most_common_move = max(moves_seen, key=moves_seen.get)  # type: ignore[arg-type]
+            agreement = moves_seen[most_common_move] / repeats
+
+            results.append({
+                "position": pos["name"],
+                "iterations": iters,
+                "move": most_common_move,
+                "move_counts": dict(moves_seen),
+                "agreement": agreement,
+                "time_avg_s": sum(times) / len(times),
+                "time_min_s": min(times),
+                "time_max_s": max(times),
+                "success": True,
+            })
+
+    return results
+
+
+def print_mcts_time_table(mcts_results: List[Dict]):
+    """Print MCTS search time per iteration level."""
+    print("\n" + "=" * 120)
+    print(" MCTS: Search Time per Iteration Count (averaged over positions + runs)")
+    print("=" * 120)
+
+    from collections import defaultdict
+    agg: Dict[int, List[float]] = defaultdict(list)
+
+    for r in mcts_results:
+        agg[r["iterations"]].append(r["time_avg_s"])
+
+    print(f"\n{'Iterations':>12s}  {'Avg Time':>12s}  {'Time/1k Iters':>16s}  Notes")
+    print("-" * 80)
+
+    for iters in sorted(agg):
+        times = agg[iters]
+        avg_s = sum(times) / len(times)
+        per_1k = avg_s / (iters / 1000) if iters > 0 else 0
+        note = ""
+        if avg_s > 1.0:
+            note = "  (slow — consider reducing)"
+        elif avg_s > 0.1:
+            note = "  (moderate)"
+        print(f"  {iters:>8d}  "
+              f"{fmt_time(avg_s, False):>12s}  "
+              f"{fmt_time(per_1k, False):>16s}"
+              f"{note}")
+
+    print("-" * 80)
+    print(f"  (averaged over {len(TEST_POSITIONS)} positions × {MCTS_REPEATS} runs each)")
+
+
+def print_mcts_move_table(mcts_results: List[Dict]):
+    """Print MCTS move choices at each iteration level."""
+    print("\n" + "=" * 140)
+    print(" MCTS: Move Choices & Consistency (most common move over 3 runs)")
+    print("=" * 140)
+
+    from collections import defaultdict
+    by_pos = defaultdict(dict)
+    for r in mcts_results:
+        by_pos[r["position"]][r["iterations"]] = r
+
+    all_iters = sorted(set(r["iterations"] for r in mcts_results))
+
+    # Header
+    header = f"\n{'Position':<10s}"
+    for it in all_iters:
+        header += f"  {'iters=' + str(it):>22s}"
+    print(header)
+    print("-" * 140)
+
+    for pos_name in sorted(by_pos):
+        row = f"{pos_name:<10s}"
+        for it in all_iters:
+            r = by_pos[pos_name].get(it)
+            if r:
+                move_s = move_to_algebraic(r["move"])
+                agr = f"{r['agreement']:.0%}"
+                time_s = fmt_time(r["time_avg_s"], False)
+                row += f"  {move_s:>4s} {time_s:>10s} {agr:>4s}"
+            else:
+                row += f"  {'--':>22s}"
+        print(row)
+
+    print("-" * 140)
+    print(f"  Format: move time agreement%")
+    print(f"  agreement = portion of {MCTS_REPEATS} runs that chose the most-common move")
+
+
+def print_mcts_vs_negamax(mcts_results: List[Dict], negamax_results: List[Dict]):
+    """Compare MCTS move choices to Negamax v4_full as reference."""
+    print("\n" + "=" * 120)
+    print(" MCTS vs Negamax v4_full Move Comparison")
+    print("=" * 120)
+
+    # Build lookup: (position, depth) -> v4 move for negamax results
+    v4_moves: Dict[str, int] = {}
+    for r in negamax_results:
+        if r["engine"] == "v4_full" and r["success"]:
+            v4_moves[(r["position"], r["depth"])] = r["move"]
+
+    from collections import defaultdict
+    by_pos = defaultdict(dict)
+    for r in mcts_results:
+        by_pos[r["position"]][r["iterations"]] = r
+
+    all_iters = sorted(set(r["iterations"] for r in mcts_results))
+
+    # Use v4's d=8 results as baseline comparison (strongest single-depth)
+    compare_depth = 8
+
+    print(f"\n  Comparing MCTS moves to Negamax v4_full at depth={compare_depth}")
+    print()
+    header = f"{'Position':<10s}  {'v4_d8':>6s}"
+    for it in all_iters:
+        header += f"  {'iters='+str(it):>18s}"
+    print(header)
+    print("-" * 120)
+
+    match_counts = defaultdict(int)
+    total_tests = 0
+
+    for pos_name in sorted(by_pos):
+        v4_move = v4_moves.get((pos_name, compare_depth), -1)
+        v4_str = move_to_algebraic(v4_move) if v4_move >= 0 else "??"
+        row = f"{pos_name:<10s}  {v4_str:>6s}"
+        for it in all_iters:
+            r = by_pos[pos_name].get(it)
+            if r:
+                match = "✓" if r["move"] == v4_move else "—"
+                row += f"  {move_to_algebraic(r['move']):>4s} {match:>4s} {r['agreement']:.0%}"
+                if r["move"] == v4_move:
+                    match_counts[it] = match_counts.get(it, 0) + 1
+                total_tests += 0  # noop
+            else:
+                row += f"  {'--':>18s}"
+        print(row)
+
+    # Per iteration summary
+    print()
+    for it in all_iters:
+        count = match_counts.get(it, 0)
+        pct = count / len(TEST_POSITIONS) * 100
+        print(f"  iters={it:>6d}: matched v4_d8 in {count}/{len(TEST_POSITIONS)} "
+              f"positions ({pct:.0f}%)")
+
+
+# =====================================================================
 #  Demo mode
 # =====================================================================
 
@@ -712,6 +989,10 @@ def main():
                         help="Match search depth (default 6)")
     parser.add_argument("--games", type=int, default=2,
                         help="Games per matchup (default 2)")
+    parser.add_argument("--mcts", action="store_true",
+                        help="Include MCTS engine benchmark")
+    parser.add_argument("--mcts-only", action="store_true",
+                        help="Run only MCTS benchmark (skip Negamax engines)")
     args = parser.parse_args()
 
     print("=" * 60)
@@ -730,37 +1011,71 @@ def main():
         run_demo()
         return
 
-    print("Loading engines...")
-    engines = create_all_engines()
-    for ek, eng in engines.items():
-        has_to = eng._set_time_limit_fn is not None
-        has_dbg = eng._debug_var is not None
-        print(f"  [OK] {eng.name} (timeout={has_to}, debug={has_dbg})")
+    # ── Negamax benchmark ──
+    engines: Dict[str, Engine] = {}
+    results: List[Dict] = []
+    if not args.mcts_only:
+        print("Loading engines...")
+        engines = create_all_engines()
+        for ek, eng in engines.items():
+            has_to = eng._set_time_limit_fn is not None
+            has_dbg = eng._debug_var is not None
+            print(f"  [OK] {eng.name} (timeout={has_to}, debug={has_dbg})")
 
-    depths_map = QUICK_DEPTHS if args.quick else BENCH_DEPTHS
-    mode = "Quick" if args.quick else "Full"
-    print(f"\nMode: {mode} test")
+        depths_map = QUICK_DEPTHS if args.quick else BENCH_DEPTHS
+        mode = "Quick" if args.quick else "Full"
+        print(f"\nMode: {mode} test")
 
-    print(f"\nTest positions: {len(TEST_POSITIONS)}")
-    for pos in TEST_POSITIONS:
-        print(f"  - {pos['name']}: {pos['desc']}")
+        print(f"\nTest positions: {len(TEST_POSITIONS)}")
+        for pos in TEST_POSITIONS:
+            print(f"  - {pos['name']}: {pos['desc']}")
 
-    print(f"\nStarting benchmark (timeout={SEARCH_TIMEOUT_S:.0f}s per call)...\n")
-    results = run_benchmark(engines, TEST_POSITIONS, depths_map, debug_off=True)
+        print(f"\nStarting benchmark (timeout={SEARCH_TIMEOUT_S:.0f}s per call)...\n")
+        results = run_benchmark(engines, TEST_POSITIONS, depths_map, debug_off=True)
 
-    # Print reports
-    print_per_depth_speed_table(results)
-    print_move_agreement(results)
+        # Print reports
+        print_per_depth_speed_table(results)
+        print_move_agreement(results)
 
-    if args.compare:
-        run_head_to_head(engines, games_per_match=args.games, depth=args.depth)
+        if args.compare:
+            run_head_to_head(engines, games_per_match=args.games, depth=args.depth)
+
+    # ── MCTS benchmark ──
+    mcts_results = None
+    if args.mcts or args.mcts_only:
+        print("\n" + "=" * 60)
+        print(" MCTS Engine Benchmark")
+        print("=" * 60)
+        print(f"\nIteration levels: {MCTS_ITER_LEVELS}")
+        print(f"Repeats per test: {MCTS_REPEATS}")
+        print(f"Test positions: {len(TEST_POSITIONS)}")
+
+        try:
+            mcts_engine = MCTSEngine("search_mct")
+            print(f"  [OK] MCTS engine loaded ({mcts_engine.lib_name})\n")
+        except FileNotFoundError as e:
+            print(f"  [FAIL] {e}\n  Skipping MCTS benchmark.\n")
+            mcts_engine = None
+
+        if mcts_engine:
+            mcts_results = run_mcts_benchmark(
+                mcts_engine, TEST_POSITIONS, MCTS_ITER_LEVELS, MCTS_REPEATS)
+            print_mcts_time_table(mcts_results)
+            print_mcts_move_table(mcts_results)
+            if not args.mcts_only and results:
+                print_mcts_vs_negamax(mcts_results, results)
 
     # Summary stats
-    total_ok = sum(1 for r in results if r["success"] and not r["timed_out"])
-    total_to = sum(1 for r in results if r["timed_out"])
-    total_fail = sum(1 for r in results if not r["success"])
-    print(f"\nTotal: {len(results)} searches -- "
-          f"{total_ok} OK, {total_to} timeout, {total_fail} failed")
+    if results:
+        total_ok = sum(1 for r in results if r["success"] and not r["timed_out"])
+        total_to = sum(1 for r in results if r["timed_out"])
+        total_fail = sum(1 for r in results if not r["success"])
+        print(f"\nTotal (Negamax): {len(results)} searches -- "
+              f"{total_ok} OK, {total_to} timeout, {total_fail} failed")
+
+    if mcts_results:
+        mcts_ok = sum(1 for r in mcts_results if r["success"])
+        print(f"Total (MCTS): {len(mcts_results)} searches -- {mcts_ok} OK")
 
     print("\n[OK] Benchmark complete!")
 

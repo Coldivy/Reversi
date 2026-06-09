@@ -7,6 +7,8 @@
  * 支持 spec 特性：
  *   • type="select"  → 下拉选择器（含 options 列表）
  *   • show_if        → 条件显示（当 other_key == required_value 时可见）
+ *
+ * 空 URL 自动隐藏引擎 UI（人类玩家模式）。
  */
 
 import type { EngineConfig, EngineSpec, EngineParamSpec } from "../api/ai";
@@ -15,9 +17,11 @@ import type { EngineConfig, EngineSpec, EngineParamSpec } from "../api/ai";
 //  引擎数据加载
 // ======================================================================
 
-/** 相对路径获取引擎列表 */
-async function loadEngineSpecs(): Promise<EngineSpec[]> {
-  const resp = await fetch("/api/engines");
+async function loadEngineSpecs(baseUrl?: string): Promise<EngineSpec[]> {
+  const enginesUrl = baseUrl
+    ? baseUrl.replace(/\/(ai-move-timelimit|ai-move)(\?.*)?$/, "/engines")
+    : "/api/engines";
+  const resp = await fetch(enginesUrl);
   if (!resp.ok) throw new Error(`获取引擎列表失败: ${resp.status}`);
   return resp.json();
 }
@@ -26,7 +30,6 @@ async function loadEngineSpecs(): Promise<EngineSpec[]> {
 //  UI 构建
 // ======================================================================
 
-/** 为一个 param spec 生成输入控件 HTML */
 function renderParamControl(p: EngineParamSpec): string {
   if (p.type === "select" && p.options) {
     return p.options
@@ -36,33 +39,28 @@ function renderParamControl(p: EngineParamSpec): string {
       )
       .join("");
   }
-  /* type === "int" */
   return `<input type="number" class="param-value" data-param-key="${p.key}"
             value="${p.default}" min="${p.min ?? ""}" max="${p.max ?? ""}"
             title="${p.label} (${p.min ?? "-∞"} – ${p.max ?? "∞"})">`;
 }
 
-/** 为一个引擎 spec 生成参数输入行 HTML */
 function makeParamRows(spec: EngineSpec): string {
   return spec.params
-    .map(
-      (p) => {
-        const showIfAttr = p.show_if
-          ? ` data-show-if='${JSON.stringify(p.show_if)}'`
-          : "";
-        return `
+    .map((p) => {
+      const showIfAttr = p.show_if
+        ? ` data-show-if='${JSON.stringify(p.show_if)}'`
+        : "";
+      return `
     <div class="param-row" data-param-key="${p.key}"${showIfAttr}>
       <label class="param-label">${p.label}</label>
       ${p.type === "select" ? `<select class="param-value param-select" data-param-key="${p.key}">${renderParamControl(p)}</select>`
         : renderParamControl(p)}
       <span class="param-unit"></span>
     </div>`;
-      },
-    )
+    })
     .join("");
 }
 
-/** 为一个引擎 spec 生成下拉 option */
 function engineOption(spec: EngineSpec, selected: boolean): string {
   return `<option value="${spec.name}"${selected ? " selected" : ""}>
     ${spec.label}</option>`;
@@ -72,26 +70,17 @@ function engineOption(spec: EngineSpec, selected: boolean): string {
 //  show_if 可见性管理
 // ======================================================================
 
-/**
- * 根据当前 select 值更新所有带 show_if 条件的参数行的可见性。
- * 任一 select 改变后调用。
- */
 function updateParamVisibility(sideEl: HTMLElement): void {
-  /* 收集当前 side 所有 select 型 param 的值 */
   const selectValues: Record<string, string> = {};
   sideEl.querySelectorAll<HTMLSelectElement>(".param-select").forEach((sel) => {
     selectValues[sel.dataset.paramKey!] = sel.value;
   });
 
-  /* 遍历带 show_if 的行 */
   sideEl.querySelectorAll<HTMLElement>("[data-show-if]").forEach((row) => {
     const condition = JSON.parse(row.dataset.showIf!) as Record<string, string>;
     let visible = true;
     for (const [key, required] of Object.entries(condition)) {
-      if (selectValues[key] !== required) {
-        visible = false;
-        break;
-      }
+      if (selectValues[key] !== required) { visible = false; break; }
     }
     row.style.display = visible ? "" : "none";
   });
@@ -109,7 +98,6 @@ function readSideConfig(sideEl: HTMLElement): EngineConfig | null {
   const engineSelect = sideEl.querySelector<HTMLSelectElement>(".engine-type")!;
   const engine = engineSelect.value;
 
-  /* 收集所有参数值：select 型取字符串，number input 取整数 */
   const params: Record<string, number | string> = {};
   sideEl.querySelectorAll<HTMLInputElement>(".param-value").forEach((inp) => {
     const key = inp.dataset.paramKey!;
@@ -134,11 +122,7 @@ const FALLBACK_SPECS: EngineSpec[] = [
     label: "Negamax (Alpha-Beta)",
     params: [
       { key: "strategy", type: "select", default: "fixed_depth", label: "搜索模式",
-        options: [
-          { value: "fixed_depth", label: "固定深度" },
-          { value: "time_limit", label: "限时搜索" },
-        ],
-      },
+        options: [{ value: "fixed_depth", label: "固定深度" }, { value: "time_limit", label: "限时搜索" }] },
       { key: "depth", type: "int", default: 14, min: 1, max: 64, label: "搜索深度",
         show_if: { strategy: "fixed_depth" } },
       { key: "time_limit_ms", type: "int", default: 3000, min: 10, max: 600000, label: "时间上限 (ms)",
@@ -155,16 +139,88 @@ const FALLBACK_SPECS: EngineSpec[] = [
 ];
 
 // ======================================================================
+//  侧面板 UI 辅助
+// ======================================================================
+
+function setSideEngineVisible(sideEl: HTMLElement, visible: boolean) {
+  const engineSelect = sideEl.querySelector<HTMLSelectElement>(".engine-type")!;
+  const paramGroup = sideEl.querySelector<HTMLDivElement>(".param-group")!;
+  engineSelect.style.display = visible ? "" : "none";
+  paramGroup.style.display = visible ? "" : "none";
+}
+
+function rebuildSideEngineUI(sideId: string, newSpecs: EngineSpec[], sideSpecs: Record<string, EngineSpec[]>) {
+  const sideEl = document.getElementById(sideId)!;
+  const engineSelect = sideEl.querySelector<HTMLSelectElement>(".engine-type")!;
+  const paramGroup = sideEl.querySelector<HTMLDivElement>(".param-group")!;
+  const defaultSpec = newSpecs[0];
+
+  sideSpecs[sideId] = newSpecs;
+  engineSelect.innerHTML = newSpecs
+    .map((s) => engineOption(s, s.name === defaultSpec.name))
+    .join("");
+  paramGroup.innerHTML = makeParamRows(defaultSpec);
+  updateParamVisibility(sideEl);
+
+  sideEl.querySelectorAll<HTMLSelectElement>(".param-select").forEach((ps) => {
+    ps.addEventListener("change", () => updateParamVisibility(sideEl));
+  });
+}
+
+/**
+ * 自动探测某一侧 URL 并更新 UI（blur / 初始加载 / 手动探测共用）。
+ */
+async function autoProbeSide(
+  sideEl: HTMLElement,
+  sideSpecs: Record<string, EngineSpec[]>,
+) {
+  const sideId = sideEl.id;
+  const urlInput = sideEl.querySelector<HTMLInputElement>(".side-url")!;
+  const statusSpan = sideEl.querySelector<HTMLSpanElement>(".url-status")!;
+
+  statusSpan.className = "url-status";
+  const raw = urlInput.value.trim();
+
+  /* 空 URL → 人类玩家，成功 */
+  if (!raw) {
+    setSideEngineVisible(sideEl, false);
+    statusSpan.className = "url-status url-ok";
+    statusSpan.title = "人类玩家";
+    statusSpan.textContent = "✓";
+    return;
+  }
+
+  /* 有 URL，尝试探测。失败时重新抛出让调用方感知 */
+  statusSpan.textContent = "⏳";
+  statusSpan.title = "探测中...";
+
+  let remoteSpecs: EngineSpec[];
+  try {
+    remoteSpecs = await loadEngineSpecs(raw);
+  } catch (err) {
+    console.error(`探测远程引擎失败 (${sideId}):`, err);
+    setSideEngineVisible(sideEl, false);
+    statusSpan.className = "url-status url-err";
+    statusSpan.title = "探测失败 — 请检查 URL";
+    statusSpan.textContent = "✗";
+    throw err;
+  }
+
+  rebuildSideEngineUI(sideId, remoteSpecs, sideSpecs);
+  setSideEngineVisible(sideEl, true);
+  statusSpan.className = "url-status url-ok";
+  statusSpan.title = `探测成功: ${remoteSpecs.length} 个引擎`;
+  statusSpan.textContent = "✓";
+}
+
+// ======================================================================
 //  主入口
 // ======================================================================
 
 export async function showChoosePanel(
-  onChoose: (
-    blackConfig: EngineConfig | null,
-    whiteConfig: EngineConfig | null,
-  ) => void,
+  onChoose: (blackConfig: EngineConfig | null, whiteConfig: EngineConfig | null) => void,
 ) {
-  /* ── 先加载引擎列表 ── */
+  /* ── 加载本地引擎列表 ── */
   let specs: EngineSpec[];
   try {
     specs = await loadEngineSpecs();
@@ -172,8 +228,13 @@ export async function showChoosePanel(
     console.error("无法获取引擎列表，使用内置回退:", err);
     specs = FALLBACK_SPECS;
   }
-
   const defaultSpec = specs[0];
+
+  /* ── 按 side 存储当前活跃的引擎 spec ── */
+  const sideSpecs: Record<string, EngineSpec[]> = {
+    "black-side": specs,
+    "white-side": specs,
+  };
 
   /* ── 构建 DOM ── */
   const panel = document.createElement("div");
@@ -183,11 +244,14 @@ export async function showChoosePanel(
 
     <div class="choose-sides">
 
-      <!-- 黑方 -->
       <div class="choose-side" id="black-side">
         <div class="side-header side-header-black">⚫ 黑方</div>
-        <input type="url" class="side-url" placeholder="留空 = 人类玩家"
-               value="/api/ai-move">
+        <div class="url-row">
+          <input type="url" class="side-url" placeholder="留空 = 人类玩家"
+                 value="/api/ai-move">
+          <button type="button" class="url-probe-btn" title="探测远程引擎">🔍</button>
+          <span class="url-status" title="尚未探测"></span>
+        </div>
         <select class="engine-type" data-side="black">
           ${specs.map((s) => engineOption(s, s.name === defaultSpec.name)).join("")}
         </select>
@@ -196,11 +260,14 @@ export async function showChoosePanel(
         </div>
       </div>
 
-      <!-- 白方 -->
       <div class="choose-side" id="white-side">
         <div class="side-header side-header-white">⚪ 白方</div>
-        <input type="url" class="side-url" placeholder="留空 = 人类玩家"
-               value="">
+        <div class="url-row">
+          <input type="url" class="side-url" placeholder="留空 = 人类玩家"
+                 value="">
+          <button type="button" class="url-probe-btn" title="探测远程引擎">🔍</button>
+          <span class="url-status" title="尚未探测"></span>
+        </div>
         <select class="engine-type" data-side="white">
           ${specs.map((s) => engineOption(s, s.name === defaultSpec.name)).join("")}
         </select>
@@ -225,9 +292,82 @@ export async function showChoosePanel(
   document.body.appendChild(overlay);
   overlay.appendChild(panel);
 
+  /* ── 每侧探测状态: "pending" | "ok" | "err" ── */
+  const sideProbeStatus: Record<string, string> = {
+    "black-side": "pending",
+    "white-side": "pending",
+  };
+
+  /* ── 开始按钮状态管理 ── */
+  const startBtn = document.getElementById("start-btn")!;
+  const START_TEXT = { ok: "开始", pending: "请检查两侧引擎连接", err: "请检查两侧引擎连接" };
+
+  function updateStartButton() {
+    const bothOk = sideProbeStatus["black-side"] === "ok"
+                && sideProbeStatus["white-side"] === "ok";
+    if (bothOk) {
+      startBtn.className = "";
+      startBtn.textContent = START_TEXT.ok;
+    } else {
+      startBtn.className = "disabled";
+      startBtn.textContent = START_TEXT.pending;
+    }
+  }
+
   /* ── 初始 show_if 可见性 ── */
   document.querySelectorAll<HTMLElement>(".choose-side").forEach((side) => {
     updateParamVisibility(side);
+  });
+
+  /**
+   * 包裹 autoProbeSide，联用更新探状态和按钮。
+   */
+  async function probeAndUpdate(
+    sideEl: HTMLElement,
+    sideSpecs: Record<string, EngineSpec[]>,
+  ) {
+    const sideId = sideEl.id;
+    sideProbeStatus[sideId] = "pending";
+    updateStartButton();
+
+    try {
+      await autoProbeSide(sideEl, sideSpecs);
+      /* autoProbeSide 不抛错即表示成功（包括空 URL 也算成功） */
+      sideProbeStatus[sideId] = "ok";
+    } catch {
+      sideProbeStatus[sideId] = "err";
+    }
+    updateStartButton();
+  }
+
+  /* ── 初始：空 URL → 直接 ok；有值 → 自动探测 ── */
+  const sideEls = Array.from(document.querySelectorAll<HTMLElement>(".choose-side"));
+  for (const side of sideEls) {
+    const urlInput = side.querySelector<HTMLInputElement>(".side-url")!;
+    if (!urlInput.value.trim()) {
+      setSideEngineVisible(side, false);
+      sideProbeStatus[side.id] = "ok";
+    } else {
+      /* 探测完成后统一更新按钮 */
+      await probeAndUpdate(side, sideSpecs);
+    }
+  }
+  updateStartButton();
+
+  /* ── URL 输入框失焦时自动探测 ── */
+  panel.querySelectorAll<HTMLInputElement>(".side-url").forEach((inp) => {
+    inp.addEventListener("blur", () => {
+      const sideEl = inp.closest<HTMLElement>(".choose-side")!;
+      probeAndUpdate(sideEl, sideSpecs);
+    });
+  });
+
+  /* ── 手动探测按钮 ── */
+  panel.querySelectorAll<HTMLButtonElement>(".url-probe-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const sideEl = btn.closest<HTMLElement>(".choose-side")!;
+      probeAndUpdate(sideEl, sideSpecs);
+    });
   });
 
   /* ── 引擎切换 → 重建参数行 ── */
@@ -235,12 +375,10 @@ export async function showChoosePanel(
     sel.addEventListener("change", () => {
       const sideEl = sel.closest<HTMLElement>(".choose-side")!;
       const paramGroup = sideEl.querySelector<HTMLDivElement>(".param-group")!;
-      const spec = specs.find((s) => s.name === sel.value);
+      const spec = sideSpecs[sideEl.id].find((s) => s.name === sel.value);
       if (spec) {
         paramGroup.innerHTML = makeParamRows(spec);
         updateParamVisibility(sideEl);
-
-        /* 重新绑定该 side 内 select 的 change 事件 */
         sideEl.querySelectorAll<HTMLSelectElement>(".param-select").forEach((ps) => {
           ps.addEventListener("change", () => updateParamVisibility(sideEl));
         });
@@ -257,8 +395,10 @@ export async function showChoosePanel(
   });
 
   /* ── 开始按钮 ── */
-  const startBtn = document.getElementById("start-btn")!;
   startBtn.addEventListener("click", () => {
+    if (sideProbeStatus["black-side"] !== "ok" || sideProbeStatus["white-side"] !== "ok") {
+      return;  /* 防双击 / 未通过探测时忽略 */
+    }
     const blackConfig = readSideConfig(document.getElementById("black-side")!);
     const whiteConfig = readSideConfig(document.getElementById("white-side")!);
     onChoose(blackConfig, whiteConfig);
