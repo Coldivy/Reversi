@@ -210,6 +210,7 @@ body {
 }
 
 /* 选择颜色全屏遮罩（负责虚化背景 + 居中面板) */
+/* 选择颜色全屏遮罩（负责虚化背景 + 居中面板) */
 #choose-overlay {
   position: fixed;
   top: 0;
@@ -217,27 +218,25 @@ body {
   width: 100vw;
   height: 100vh;
 
-  /* 背景虚化 */
-  background: rgba(245, 245, 240, 1);
+  background: rgba(245, 245, 240, 0.92);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
 
-  /* 让内部面板居中（不受 body 任何布局影响） */
   display: flex;
   justify-content: center;
   align-items: center;
 
-  z-index: 1000; /* 确保在所有内容之上 */
+  z-index: 1000;
 }
 
-/* 白底选择面板 */
+/* 选择面板 — 浅绿底，与棋盘色调一致 */
 #choose-panel {
-  background: #ffffff;
-  border: none;
+  background: #f5faf7;
+  border: 1px solid #ccd1d1;
   border-radius: 20px;
   padding: 36px 44px;
   text-align: center;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 12px 40px rgba(93, 109, 126, 0.15);
   font-family: sans-serif;
   min-width: 560px;
   width: fit-content;
@@ -249,7 +248,7 @@ body {
   margin: 0 0 24px 0;
   font-size: 18px;
   font-weight: 600;
-  color: #1a1a1a;
+  color: #5d6d7e;
   text-align: center;
 }
 
@@ -268,41 +267,99 @@ body {
   flex-direction: column;
   gap: 10px;
   padding: 18px 16px;
-  border: 1px solid #e8e8e8;
+  border: 1px solid #c8e6d4;
   border-radius: 12px;
-  background: #fafbfc;
+  background: #eef8f2;
 }
 
 /* ── 侧标头 ── */
 .side-header {
   font-size: 15px;
   font-weight: 600;
-  color: #333;
+  color: #5d6d7e;
   text-align: center;
   padding-bottom: 6px;
-  border-bottom: 1px solid #e8e8e8;
+  border-bottom: 1px solid #c8e6d4;
 }
 
-.side-header-black { color: #222; }
-.side-header-white { color: #777; }
+.side-header-black {
+  color: #3d4f5a;
+}
+.side-header-white {
+  color: #7a9a8c;
+}
 
 /* ── URL 输入 ── */
 .side-url {
   width: 100%;
   height: 36px;
   padding: 0 10px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid #b8d8c8;
   border-radius: 6px;
-  background-color: #fafafa;
-  color: #333333;
+  background-color: #fafdfb;
+  color: #4a5a6a;
   font-size: 13px;
   box-sizing: border-box;
   outline: none;
 }
 
 .side-url:focus {
-  border-color: #007bff;
+  border-color: #80c2aa;
   background-color: #ffffff;
+}
+
+.side-url::placeholder {
+  color: #9bb5a8;
+}
+
+/* ── URL 行（输入 + 探测按钮 + 状态图标） ── */
+.url-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.url-row .side-url {
+  flex: 1;
+}
+
+.url-probe-btn {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid #b8d8c8;
+  border-radius: 6px;
+  background: #f0faf4;
+  font-size: 16px;
+  cursor: pointer;
+  line-height: 34px;
+  text-align: center;
+  outline: none;
+  color: #5d6d7e;
+}
+
+.url-probe-btn:hover {
+  background: #e0f2e8;
+  border-color: #80c2aa;
+  color: #3d4f5a;
+}
+
+.url-status {
+  flex-shrink: 0;
+  width: 20px;
+  height: 36px;
+  line-height: 36px;
+  font-size: 16px;
+  text-align: center;
+}
+
+.url-status.url-ok {
+  color: #5a9e86;
+}
+
+.url-status.url-err {
+  color: #c06050;
 }
 
 /* ── 下拉选择器 ── */
@@ -311,10 +368,10 @@ body {
   width: 100%;
   height: 36px;
   padding: 0 8px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid #b8d8c8;
   border-radius: 6px;
-  background-color: #fafafa;
-  color: #333333;
+  background-color: #fafdfb;
+  color: #4a5a6a;
   font-size: 13px;
   box-sizing: border-box;
   outline: none;
@@ -323,13 +380,15 @@ body {
 
 .engine-type:focus,
 .param-strategy:focus {
-  border-color: #007bff;
+  border-color: #80c2aa;
   background-color: #ffffff;
 }
 
 /* ── 参数行 ── */
 .param-group {
-  /* 由 JS 动态填充 */
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .param-row {
@@ -340,7 +399,7 @@ body {
 
 .param-label {
   font-size: 12px;
-  color: #666666;
+  color: #5d6d7e;
   font-weight: 500;
   white-space: nowrap;
 }
@@ -349,10 +408,10 @@ body {
   flex: 1;
   height: 36px;
   padding: 0 8px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid #b8d8c8;
   border-radius: 6px;
-  background-color: #fafafa;
-  color: #333333;
+  background-color: #fafdfb;
+  color: #4a5a6a;
   font-size: 13px;
   box-sizing: border-box;
   outline: none;
@@ -360,7 +419,7 @@ body {
 }
 
 .param-value:focus {
-  border-color: #007bff;
+  border-color: #80c2aa;
   background-color: #ffffff;
 }
 
@@ -374,7 +433,7 @@ body {
 
 .param-unit {
   font-size: 12px;
-  color: #888888;
+  color: #7a9a8c;
   white-space: nowrap;
   min-width: 24px;
   text-align: left;
@@ -392,30 +451,30 @@ body {
   width: 100%;
   height: 36px;
   padding: 0 10px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid #b8d8c8;
   border-radius: 6px;
-  background-color: #fafafa;
-  color: #333333;
+  background-color: #fafdfb;
+  color: #4a5a6a;
   font-size: 13px;
   box-sizing: border-box;
   outline: none;
 }
 
 .form-input:focus {
-  border-color: #007bff;
+  border-color: #80c2aa;
   background-color: #ffffff;
 }
 
 .form-label {
   font-size: 12px;
-  color: #666666;
+  color: #5d6d7e;
   font-weight: 500;
   align-self: self-start;
 }
 
 /* 开始按钮 */
 #start-btn {
-  background-color: #007bff;
+  background-color: #5d6d7e;
   color: #ffffff;
   text-align: center;
   height: 38px;
@@ -428,16 +487,23 @@ body {
   user-select: none;
 }
 
-/* 按钮点击/悬停状态：瞬间切换 */
 #start-btn:hover {
-  background-color: #0069d9;
+  background-color: #4a5a6a;
 }
 
 #start-btn:active {
-  background-color: #0056b3;
+  background-color: #3d4f5a;
+}
+
+#start-btn.disabled {
+  background-color: #c4d4d0;
+  color: #eaf2ef;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 #remarks {
-  font-size: 16px;
-  color: #444444;
+  font-size: 14px;
+  color: #7a9a8c;
+  line-height: 1.6;
 }

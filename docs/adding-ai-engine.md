@@ -102,10 +102,10 @@ DLLEXPORT void my_engine_search(int board[8][8], int player,
 
 ```bash
 # Windows
-gcc -shared -O2 -static -o search_<name>.dll search_<name>.c
+gcc -shared -O3 -static -o search_<name>.dll search_<name>.c
 
 # Linux
-gcc -shared -O2 -static -fPIC -o search_<name>.so search_<name>.c
+gcc -shared -O3 -static -fPIC -o search_<name>.so search_<name>.c
 ```
 
 `-static` 是必要的，否则 Python 运行时可能找不到 `libgcc_s_seh-1.dll`。

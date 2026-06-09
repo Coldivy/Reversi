@@ -130,9 +130,19 @@ function executePlayerMove(r: number, c: number) {
 //  启动 → 选择面板
 // ======================================================================
 
+/* 防御：校验配置完整性，空 url / 空 engine 视为人类玩家 */
+function sanitizeConfig(c: EngineConfig | null): EngineConfig | null {
+  if (!c) return null;
+  if (!c.url || !c.engine) {
+    console.warn("检测到无效引擎配置（缺少 url 或 engine），已回退为人类玩家", c);
+    return null;
+  }
+  return c;
+}
+
 showChoosePanel(async (bc, wc) => {
-  blackConfig = bc;
-  whiteConfig = wc;
+  blackConfig = sanitizeConfig(bc);
+  whiteConfig = sanitizeConfig(wc);
   step = "playing";
 
   /* 新局前重置各 AI 后端 */
