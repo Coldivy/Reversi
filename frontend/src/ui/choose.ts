@@ -133,7 +133,16 @@ const FALLBACK_SPECS: EngineSpec[] = [
     name: "mcts",
     label: "MCTS (蒙特卡洛)",
     params: [
-      { key: "iterations", type: "int", default: 20000, min: 100, max: 10000000, label: "模拟次数" },
+      { key: "strategy", type: "select", default: "fixed_iterations", label: "搜索模式",
+        options: [
+          { value: "fixed_iterations", label: "固定模拟次数" },
+          { value: "time_limit", label: "限时搜索" },
+        ],
+      },
+      { key: "iterations", type: "int", default: 20000, min: 100, max: 10000000, label: "模拟次数",
+        show_if: { strategy: "fixed_iterations" } },
+      { key: "time_limit_ms", type: "int", default: 3000, min: 100, max: 600000, label: "时间上限 (ms)",
+        show_if: { strategy: "time_limit" } },
     ],
   },
 ];

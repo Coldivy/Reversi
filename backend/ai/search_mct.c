@@ -1,15 +1,23 @@
 /**
  * search_mct.c — 黑白棋（Reversi/Othello）MCTS 搜索引擎
  *
- * 编译: gcc -shared -O2 -o search_mct.dll search_mct.c
- *       gcc -shared -O2 -fPIC -o search_mct.so search_mct.c (Linux)
+ * 编译: gcc -shared -O3 -o search_mct.dll search_mct.c
+ *       gcc -shared -O3 -fPIC -o search_mct.so search_mct.c (Linux)
  *
  * 接口:
- *   void mcts_search(int board[8][8], int player, int *out_x, int *out_y, int iterations)
- *   board: 8x8数组，0=空 1=黑 2=白
- *   player: 1=黑 2=白
- *   out_x/out_y: 输出落子坐标
- *   iterations: MCTS迭代次数
+ *   void mcts_search(int board[8][8], int player,
+ *                    int *out_x, int *out_y, int iterations,
+ *                    int *out_win_rate_pct)
+ *   void mcts_search_timed(int board[8][8], int player,
+ *                          int *out_x, int *out_y, int time_limit_ms,
+ *                          int *out_win_rate_pct, int *out_iterations)
+ *   board:              8×8 数组，0=空 1=黑 2=白
+ *   player:             1=黑 2=白
+ *   out_x / out_y:      输出落子坐标
+ *   iterations:         MCTS 迭代次数（search）
+ *   time_limit_ms:      时间上限（search_timed）
+ *   out_win_rate_pct:   输出胜率（0–100），可为 NULL
+ *   out_iterations:     输出实际完成的迭代次数（search_timed）
  */
 
 #include <math.h>
@@ -340,11 +348,16 @@ static void node_add_child(MCTSNode *parent, MCTSNode *child) {
   parent->children[parent->child_count++] = child;
 }
 
-/* UCB1 值 */
+/* UCB1 值
+ *
+ * 每个节点存储的 wins 来自该节点自身视角。
+ * 父节点调用 ucb1 选择子节点，需要的是「父节点视角的胜率」，
+ * 即 1 − 子节点视角胜率。不转换会导致最大化对手胜率。 */
 static double ucb1(MCTSNode *n) {
   if (n->visits == 0) return 1e300;
-  return (double)n->wins / n->visits +
-         UCB_C * sqrt(log((double)n->parent->visits) / n->visits);
+  double exploitation = 1.0 - (double)n->wins / n->visits;
+  double exploration = UCB_C * sqrt(log((double)n->parent->visits) / n->visits);
+  return exploitation + exploration;
 }
 
 /* 随机数工具 */
@@ -358,6 +371,9 @@ static inline double rand_d(void) {
 
 /* ================================================================== */
 /*  置换表（用于模拟阶段缓存）                                        */
+/*                                                                     */
+/*  键 = Zobrist 风格 64 位混合，包含黑白归属 + 行棋方。               */
+/*  p ^ o 无法区分黑白互换的局面（XOR 交换律），玩家也必须编码。       */
 /* ================================================================== */
 
 typedef struct {
@@ -368,8 +384,15 @@ typedef struct {
 
 static TTEntry tt[TT_SIZE];
 
-static inline uint64 hash_state(uint64 p, uint64 o) {
-  return p ^ (o << 1) ^ (o >> 1);
+/**
+ * 局面哈希 — 把黑位棋盘、白位棋盘、当前行棋方一起混合。
+ * 位棋盘是 64 位 uint64，直接 XOR 会产生对称冲突（p^o == o^p）。
+ * 这里用乘法破坏对称性: p * FNV_PRIME + o * 另一常数 + player。
+ */
+static inline uint64 hash_state(uint64 p, uint64 o, int player) {
+  static const uint64 FNV = 14695981039346656037ULL;
+  static const uint64 FNV2 = 1099511628211ULL;
+  return (p * FNV + 1) ^ (o * FNV2 + 1) ^ ((uint64)(unsigned)player << 32);
 }
 
 /* ================================================================== */
@@ -378,8 +401,8 @@ static inline uint64 hash_state(uint64 p, uint64 o) {
 
 static int simulate(uint64 p, uint64 o, int player) {
   /* 置换表查缓存 */
-  uint64 h = hash_state(p, o) % TT_SIZE;
-  if (tt[h].key == (p ^ o) && tt[h].visits > 10) {
+  uint64 h = hash_state(p, o, player) % TT_SIZE;
+  if (tt[h].key == hash_state(p, o, player) && tt[h].visits > 10) {
     return (tt[h].wins * 2 > tt[h].visits) ? 1 : 0;
   }
 
@@ -421,12 +444,13 @@ static int simulate(uint64 p, uint64 o, int player) {
   int o_cnt = popcount(co);
   int result = (p_cnt > o_cnt) ? 1 : 0;
 
-  /* 更新置换表 */
-  if (tt[h].key == (p ^ o)) {
+  /* 更新置换表 — 用完整的局面哈希做键 */
+  uint64 full_key = hash_state(p, o, player);
+  if (tt[h].key == full_key) {
     tt[h].visits++;
     tt[h].wins += result;
   } else {
-    tt[h].key = p ^ o;
+    tt[h].key = full_key;
     tt[h].visits = 1;
     tt[h].wins = result;
   }
@@ -439,7 +463,8 @@ static int simulate(uint64 p, uint64 o, int player) {
 /* ================================================================== */
 
 static int mcts_search_bits(uint64 black, uint64 white,
-                            int player, int iterations) {
+                            int player, int iterations,
+                            int *win_rate_pct) {
   uint64 own = (player == 1) ? black : white;
   uint64 opp = (player == 1) ? white : black;
   MCTSNode *root = node_create(own, opp, player, NULL, -1);
@@ -504,6 +529,96 @@ static int mcts_search_bits(uint64 black, uint64 white,
       best = root->children[i];
 
   int move = best->move;
+
+  /* 胜率 = AI 视角: 1 − 子节点视角胜率 */
+  if (win_rate_pct && best->visits > 0) {
+    *win_rate_pct = 100 - (best->wins * 100) / best->visits;
+  }
+
+  node_free(root);
+  return move;
+}
+
+/* ── 限时搜索版本 ── */
+
+static int mcts_search_bits_timed(uint64 black, uint64 white,
+                                  int player, int time_limit_ms,
+                                  int *win_rate_pct, int *out_iterations) {
+  uint64 own = (player == 1) ? black : white;
+  uint64 opp = (player == 1) ? white : black;
+  MCTSNode *root = node_create(own, opp, player, NULL, -1);
+
+  if (root->untried_count == 0) {
+    node_free(root);
+    *out_iterations = 0;
+    return -1;
+  }
+
+  clock_t start = clock();
+  clock_t deadline = start + (clock_t)((double)time_limit_ms / 1000.0 * CLOCKS_PER_SEC);
+  int i = 0;
+
+  /* 至少运行 1 次迭代，确保有结果返回 */
+  do {
+    /* ---- Selection ---- */
+    MCTSNode *node = root;
+    while (node->untried_count == 0 && node->child_count > 0) {
+      MCTSNode *best = node->children[0];
+      double best_v = ucb1(best);
+      for (int j = 1; j < node->child_count; j++) {
+        double v = ucb1(node->children[j]);
+        if (v > best_v) {
+          best_v = v;
+          best = node->children[j];
+        }
+      }
+      node = best;
+    }
+
+    /* ---- Expansion ---- */
+    if (node->untried_count > 0) {
+      int best_idx = 0;
+      for (int j = 1; j < node->untried_count; j++)
+        if (POS_W[node->untried[j]] > POS_W[node->untried[best_idx]])
+          best_idx = j;
+      int move = node->untried[best_idx];
+      node->untried[best_idx] = node->untried[node->untried_count - 1];
+      node->untried_count--;
+
+      uint64 np = node->p, no = node->o;
+      do_move(&np, &no, move);
+      MCTSNode *child = node_create(no, np, 3 - node->player,
+                                    node, move);
+      node_add_child(node, child);
+      node = child;
+    }
+
+    /* ---- Simulation ---- */
+    int result = simulate(node->p, node->o, node->player);
+
+    /* ---- Backpropagation ---- */
+    while (node) {
+      node->visits++;
+      node->wins += result;
+      result = 1 - result;
+      node = node->parent;
+    }
+
+    i++;
+  } while (clock() < deadline);
+
+  MCTSNode *best = root->children[0];
+  for (int j = 1; j < root->child_count; j++)
+    if (root->children[j]->visits > best->visits)
+      best = root->children[j];
+
+  int move = best->move;
+
+  if (win_rate_pct && best->visits > 0) {
+    *win_rate_pct = 100 - (best->wins * 100) / best->visits;
+  }
+  *out_iterations = i;
+
   node_free(root);
   return move;
 }
@@ -525,17 +640,47 @@ DLLEXPORT void mcts_init_seed(void) {
 
 /*
  * MCTS 搜索接口
- * board: 8x8数组，0=空 1=黑 2=白
- * player: 1=黑 2=白
- * out_x, out_y: 输出坐标
- * iterations: MCTS迭代次数
+ * board:            8×8 数组，0=空 1=黑 2=白
+ * player:           1=黑 2=白
+ * out_x / out_y:    输出落子坐标
+ * iterations:       MCTS 迭代次数
+ * out_win_rate_pct: 输出胜率（0–100），可为 NULL
  */
 DLLEXPORT void mcts_search(int board[8][8], int player,
-                           int *out_x, int *out_y, int iterations) {
+                           int *out_x, int *out_y, int iterations,
+                           int *out_win_rate_pct) {
   uint64 black, white;
   grid_to_bits(board, &black, &white);
 
-  int move = mcts_search_bits(black, white, player, iterations);
+  int move = mcts_search_bits(black, white, player, iterations,
+                              out_win_rate_pct);
+
+  if (move < 0) {
+    *out_x = -1;
+    *out_y = -1;
+  } else {
+    *out_x = move / 8;
+    *out_y = move % 8;
+  }
+}
+
+/*
+ * MCTS 限时搜索接口
+ * board:            8×8 数组，0=空 1=黑 2=白
+ * player:           1=黑 2=白
+ * out_x / out_y:    输出落子坐标
+ * time_limit_ms:    时间上限（毫秒）
+ * out_win_rate_pct: 输出胜率（0–100），可为 NULL
+ * out_iterations:   输出实际完成的迭代次数
+ */
+DLLEXPORT void mcts_search_timed(int board[8][8], int player,
+                                 int *out_x, int *out_y, int time_limit_ms,
+                                 int *out_win_rate_pct, int *out_iterations) {
+  uint64 black, white;
+  grid_to_bits(board, &black, &white);
+
+  int move = mcts_search_bits_timed(black, white, player, time_limit_ms,
+                                    out_win_rate_pct, out_iterations);
 
   if (move < 0) {
     *out_x = -1;

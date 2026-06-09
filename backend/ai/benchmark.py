@@ -32,25 +32,37 @@ TEST_POSITIONS = [
         "name": "Opening",
         "P": 0x0000000810000000,
         "O": 0x0000001008000000,
-        "desc": "Standard Othello opening",
+        "desc": "Standard Othello opening (4 pieces)",
+    },
+    {
+        "name": "EarlyMid",
+        "P": 0x0000000818280000,
+        "O": 0x0000001000080000,
+        "desc": "Early midgame (~6 pieces)",
     },
     {
         "name": "Midgame1",
-        "P": 0x0000000818280000,
-        "O": 0x0000001000080000,
-        "desc": "After 4 moves",
+        "P": 0x0000102818040000,
+        "O": 0x0000001008200000,
+        "desc": "Midgame (~14 pieces)",
     },
     {
         "name": "Midgame2",
-        "P": 0x0000102818040000,
-        "O": 0x0000001008200000,
-        "desc": "After ~10 moves",
-    },
-    {
-        "name": "Midgame3",
         "P": 0x003844181C080000,
         "O": 0x0004002040100000,
-        "desc": "After ~20 moves",
+        "desc": "Midgame (~22 pieces)",
+    },
+    {
+        "name": "LateMid",
+        "P": 0x006014381C040000,
+        "O": 0x0008002048120000,
+        "desc": "Late midgame (~32 pieces)",
+    },
+    {
+        "name": "Endgame",
+        "P": 0x1C34143C04020000,
+        "O": 0x027A223142120000,
+        "desc": "Endgame (~45 pieces)",
     },
 ]
 
@@ -82,8 +94,12 @@ SEARCH_TIMEOUT_MS = int(SEARCH_TIMEOUT_S * 1000)
 # MCTS iteration levels (analogous to depths for Negamax engines)
 MCTS_ITER_LEVELS = [100, 500, 1000, 5000, 10000, 20000, 50000, 100000]
 
-# MCTS runs per test point (to measure stochastic consistency)
-MCTS_REPEATS = 3
+# Repeats per test point for all engines
+NEGAMAX_REPEATS = 10
+MCTS_REPEATS = 10
+
+# Timed head-to-head time limits
+TIMED_COMPARE_MS = [100, 1000, 2000]
 
 Board8x8 = (ctypes.c_int * 8) * 8
 
@@ -210,7 +226,7 @@ class MCTSEngine:
     """Wraps search_mct.dll (MCTS engine) for benchmarking.
 
     Unlike the Negamax-based engines, MCTS:
-      • Uses mcts_search(board[8][8], player, *x, *y, iterations) instead of c_get_best_move
+      • Uses mcts_search(board[8][8], player, *x, *y, iterations, *win_rate_pct) instead of c_get_best_move
       • Is stochastic — same position may yield different moves
       • Uses 2D board arrays (0=empty, 1=black, 2=white) instead of bitboards
     """
@@ -229,13 +245,14 @@ class MCTSEngine:
         self.lib.mcts_init_seed.argtypes = []
         self.lib.mcts_init_seed.restype = None
 
-        # mcts_search(int board[8][8], int player, int *out_x, int *out_y, int iterations)
+        # mcts_search(int board[8][8], int player, int *out_x, int *out_y, int iterations, int *out_win_rate_pct)
         self.lib.mcts_search.argtypes = [
             Board8x8,
             ctypes.c_int,
             ctypes.POINTER(ctypes.c_int),
             ctypes.POINTER(ctypes.c_int),
             ctypes.c_int,
+            ctypes.POINTER(ctypes.c_int),
         ]
         self.lib.mcts_search.restype = None
 
@@ -246,7 +263,7 @@ class MCTSEngine:
 
     def search(self, iterations: int, P: int, O: int) -> Tuple[int, int]:
         """Run MCTS search. P/O are bitboards as stored in TEST_POSITIONS.
-        Returns (move_index, score — always 0 for MCTS).
+        Returns (move_index, win_rate_pct).
         """
         board = self._bitboards_to_array(P, O)
         occupied = (P | O).bit_count()
@@ -254,6 +271,7 @@ class MCTSEngine:
 
         out_x = ctypes.c_int(-1)
         out_y = ctypes.c_int(-1)
+        win_rate = ctypes.c_int(0)
 
         self.lib.mcts_search(
             board,
@@ -261,11 +279,43 @@ class MCTSEngine:
             ctypes.byref(out_x),
             ctypes.byref(out_y),
             ctypes.c_int(iterations),
+            ctypes.byref(win_rate),
         )
 
         if out_x.value < 0:
             return -1, 0
-        return out_x.value * 8 + out_y.value, 0
+        return out_x.value * 8 + out_y.value, win_rate.value
+
+    def search_timed(self, time_limit_ms: int, P: int, O: int,
+                     player: int = 0
+                     ) -> Tuple[int, int, int]:
+        """Timed MCTS search. Returns (move_index, win_rate_pct, iterations_done).
+
+        player: 1=black, 2=white. 0 means auto-detect via board parity.
+        """
+        board = self._bitboards_to_array(P, O)
+        if player == 0:
+            occupied = (P | O).bit_count()
+            player = 1 if occupied % 2 == 0 else 2
+
+        out_x = ctypes.c_int(-1)
+        out_y = ctypes.c_int(-1)
+        win_rate = ctypes.c_int(0)
+        iters_done = ctypes.c_int(0)
+
+        self.lib.mcts_search_timed(
+            board,
+            ctypes.c_int(player),
+            ctypes.byref(out_x),
+            ctypes.byref(out_y),
+            ctypes.c_int(time_limit_ms),
+            ctypes.byref(win_rate),
+            ctypes.byref(iters_done),
+        )
+
+        if out_x.value < 0:
+            return -1, 0, iters_done.value
+        return out_x.value * 8 + out_y.value, win_rate.value, iters_done.value
 
     @staticmethod
     def _bitboards_to_array(P: int, O: int) -> Board8x8:
@@ -384,7 +434,14 @@ def run_benchmark(engines: Dict[str, Engine],
                   positions: List[Dict],
                   depths_map: Dict[str, List[int]],
                   debug_off: bool = True,
+                  repeats: int = 1,
                   ) -> List[Dict]:
+    """Benchmark Negamax engines.
+
+    Each (position, depth) pair is run `repeats` times with engine.init()
+    called before each position to clear TT between different boards.
+    Results are aggregated: avg time, most common move, avg score.
+    """
     results = []
 
     for eng_key, engine in engines.items():
@@ -392,45 +449,60 @@ def run_benchmark(engines: Dict[str, Engine],
             engine.set_debug(0)
 
         depths = depths_map.get(eng_key, ALL_DEPTHS)
-        engine.init()
 
         for pos in positions:
             for depth in depths:
+                moves_seen: Dict[int, int] = {}
+                scores = []
+                times = []
+                timed_outs = 0
+                errors = 0
+
+                for run_idx in range(repeats):
+                    engine.init()   # clear TT between each run
+
+                    try:
+                        move, score, elapsed_s, timed_out = search_with_timeout(
+                            engine, depth, pos["P"], pos["O"])
+                        moves_seen[move] = moves_seen.get(move, 0) + 1
+                        scores.append(score)
+                        times.append(elapsed_s)
+                        if timed_out:
+                            timed_outs += 1
+                    except Exception as e:
+                        errors += 1
+                        if run_idx == 0 and repeats > 1:
+                            continue  # silent retry
+                        break
+
+                most_common_move = max(moves_seen, key=moves_seen.get) if moves_seen else -1
+                avg_time = sum(times) / len(times) if times else 0.0
+                avg_score = sum(scores) / len(scores) if scores else 0
+
                 result = {
                     "engine": eng_key,
                     "engine_name": engine.name,
                     "depth": depth,
                     "position": pos["name"],
-                    "move": -1,
-                    "score": 0,
-                    "time_s": 0.0,
-                    "timed_out": False,
-                    "success": False,
+                    "move": most_common_move,
+                    "score": int(round(avg_score)),
+                    "time_s": avg_time,
+                    "timed_out": timed_outs > repeats // 2,
+                    "success": errors < repeats,
                     "error": None,
                 }
-
-                try:
-                    move, score, elapsed_s, timed_out = search_with_timeout(
-                        engine, depth, pos["P"], pos["O"])
-                    result["move"] = move
-                    result["score"] = score
-                    result["time_s"] = elapsed_s
-                    result["timed_out"] = timed_out
-                    result["success"] = True
-                except Exception as e:
-                    result["error"] = str(e)
-
                 results.append(result)
 
-                # Progress
+                # Compact progress: show avg time & agreement
                 status = "TO" if result["timed_out"] else ("OK" if result["success"] else "FAIL")
                 move_str = move_to_algebraic(result["move"])
-                time_str = fmt_time(result["time_s"], result["timed_out"])
+                time_str = fmt_time(avg_time, result["timed_out"])
+                agr = f" {moves_seen[most_common_move]}/{repeats}" if repeats > 1 else ""
                 print(
                     f"  {status:4s} [{eng_key:20s}] d={depth:2d} "
                     f"pos={pos['name']:10s} "
-                    f"move={move_str:4s} score={score:+5d} "
-                    f"time={time_str:>12s}"
+                    f"move={move_str:4s} score={avg_score:+5.0f} "
+                    f"time={time_str:>12s}{agr}"
                 )
 
     return results
@@ -544,9 +616,9 @@ def print_per_depth_speed_table(results: List[Dict]):
 
 
 def print_move_agreement(results: List[Dict]):
-    """Move agreement with v4_full (the reference)."""
+    """Move agreement with v1_alphabeta (sound Alpha-Beta, no LMR degradation)."""
     print("\n" + "=" * 100)
-    print(" Move Agreement vs v4_full (reference)")
+    print(" Move Agreement vs v1_alphabeta (sound reference)")
     print("=" * 100)
 
     from collections import defaultdict
@@ -556,17 +628,17 @@ def print_move_agreement(results: List[Dict]):
         if r["success"]:
             groups[(r["position"], r["depth"])][r["engine"]] = r["move"]
 
-    eng_keys = ["v0_minimax", "v1_alphabeta", "v2_alphabeta_tt",
-                 "v3_full_debug"]
+    eng_keys = ["v0_minimax", "v2_alphabeta_tt",
+                 "v3_full_debug", "v4_full"]
 
     total = 0
     agreement = {ek: 0 for ek in eng_keys}
 
-    print(f"\n{'Position':<10s} {'d':>2s}  {'v0':>5s} {'v1':>5s} {'v2':>5s} {'v3':>5s}")
+    print(f"\n{'Position':<10s} {'d':>2s}  {'v0':>5s} {'v2':>5s} {'v3':>5s} {'v4':>5s}")
     print("-" * 40)
 
     for (pos_name, depth), moves in sorted(groups.items()):
-        ref_move = moves.get("v4_full")
+        ref_move = moves.get("v1_alphabeta")
         if ref_move is None:
             continue
         total += 1
@@ -581,7 +653,7 @@ def print_move_agreement(results: List[Dict]):
         print("".join(row_s))
 
     print("-" * 40)
-    print(f"\nAgreement rate (same move as v4_full):")
+    print(f"\nAgreement rate (same move as v1_alphabeta, the sound Alpha-Beta):")
     for ek in eng_keys:
         rate = agreement[ek] / total * 100 if total > 0 else 0
         print(f"  {ek:20s}: {agreement[ek]}/{total} ({rate:.0f}%)")
@@ -641,44 +713,55 @@ def _make_move_simple(P: int, O: int, move: int) -> Tuple[int, int]:
 def play_game(engine_black: Engine, engine_white: Engine,
               depth_black: int = 6, depth_white: int = 6,
               verbose: bool = False) -> Tuple[int, int, str]:
+    """Play a fixed-depth game. Uses state-machine turn logic (matching
+    frontend GameEngine.makeMove) so pass/skip is handled correctly.
+
+    P = black bitboard, O = white bitboard (constant — never swapped).
+    black_to_move = boolean state variable (no move-num parity).
+    """
     P = 0x0000000810000000
     O = 0x0000001008000000
-    passed = False
+    black_to_move = True
 
-    for move_num in range(64):
-        black_to_move = (move_num % 2 == 0)
+    for _ in range(64):  # safety cap
         engine = engine_black if black_to_move else engine_white
         depth = depth_black if black_to_move else depth_white
+        my_bb = P if black_to_move else O
+        opp_bb = O if black_to_move else P
 
-        moves = (_get_legal_moves_simple(P, O) if black_to_move
-                 else _get_legal_moves_simple(O, P))
+        moves = _get_legal_moves_simple(my_bb, opp_bb)
 
         if moves == 0:
-            opponent_moves = (_get_legal_moves_simple(O, P) if black_to_move
-                              else _get_legal_moves_simple(P, O))
-            if opponent_moves == 0 or passed:
+            # Current player has no moves — check if opponent can move
+            opp_moves = _get_legal_moves_simple(opp_bb, my_bb)
+            if opp_moves == 0:
+                # Neither can move → game over
                 break
-            passed = True
-            P, O = O, P
+            # Opponent can move → skip current player's turn
+            black_to_move = not black_to_move
             continue
-        passed = False
 
         try:
-            if black_to_move:
-                move, score = engine.get_best_move(depth, P, O)
-            else:
-                move, score = engine.get_best_move(depth, P, O)
+            move, _score = engine.get_best_move(depth, my_bb, opp_bb)
         except Exception:
             break
 
         if move < 0 or move > 63:
             break
 
-        newP, newO = _make_move_simple(P, O, move)
-        P, O = newP, newO
+        # Apply move: _make_move_simple takes (moving_side, opponent)
+        # and returns (new_moving_side, new_opponent)
+        new_my, new_opp = _make_move_simple(my_bb, opp_bb, move)
+        if black_to_move:
+            P, O = new_my, new_opp
+        else:
+            O, P = new_my, new_opp   # my_bb was O (white), result is (new_O, new_P)
 
-        if verbose and move_num < 10:
-            print(f"  move {move_num+1}: {move_to_algebraic(move)}")
+        if verbose:
+            side = "B" if black_to_move else "W"
+            print(f"  move: {side}->{move_to_algebraic(move)}")
+
+        black_to_move = not black_to_move
 
     b_cnt = popcount(P)
     w_cnt = popcount(O)
@@ -741,6 +824,168 @@ def run_head_to_head(engines: Dict[str, Engine],
         print(f"  {ek1:20s} vs {ek2:20s}: {w1}:{w2} (draws: {d})")
 
     return results
+
+
+# =====================================================================
+#  Timed head-to-head (Negamax v4 vs MCTS)
+# =====================================================================
+
+def play_game_timed(engine_black,
+                    engine_white,
+                    time_black: int = 100,
+                    time_white: int = 100,
+                    black_is_mcts: bool = False,
+                    white_is_mcts: bool = False,
+                    verbose: bool = False
+                    ) -> Tuple[int, int, str, int, int]:
+    """Play a timed game. State-machine turn logic (matches frontend GameEngine).
+
+    engine_black / engine_white can be either Engine (Negamax) or MCTSEngine.
+    black_is_mcts / white_is_mcts tells which type each side is.
+
+    Returns: (black_count, white_count, result_str, iters_black, iters_white)
+    """
+    P = 0x0000000810000000
+    O = 0x0000001008000000
+    black_to_move = True
+    iters_black_total = 0
+    iters_white_total = 0
+
+    for _ in range(64):
+        is_mcts = black_is_mcts if black_to_move else white_is_mcts
+        time_limit = time_black if black_to_move else time_white
+        my_bb = P if black_to_move else O
+        opp_bb = O if black_to_move else P
+
+        moves = _get_legal_moves_simple(my_bb, opp_bb)
+
+        if moves == 0:
+            opp_moves = _get_legal_moves_simple(opp_bb, my_bb)
+            if opp_moves == 0:
+                break
+            black_to_move = not black_to_move
+            continue
+
+        try:
+            if is_mcts:
+                engine = engine_black if black_to_move else engine_white
+                # MCTS needs true (black, white) for board encoding, not (mover, opp).
+                # Use black_to_move state to determine player (not parity — parity
+                # would be wrong after a skip-turn when the board hasn't changed).
+                dll_player = 1 if black_to_move else 2
+                move, _wr, iters = engine.search_timed(time_limit, P, O, dll_player)
+                if black_to_move:
+                    iters_black_total += iters
+                else:
+                    iters_white_total += iters
+            else:
+                engine = engine_black if black_to_move else engine_white
+                move, _score, _depth = engine.get_best_move_timed(
+                    time_limit, my_bb, opp_bb)
+        except Exception:
+            break
+
+        if move < 0 or move > 63:
+            break
+
+        new_my, new_opp = _make_move_simple(my_bb, opp_bb, move)
+        if black_to_move:
+            P, O = new_my, new_opp
+        else:
+            O, P = new_my, new_opp
+
+        if verbose:
+            side = "B" if black_to_move else "W"
+            eng = "MCTS" if is_mcts else "AB"
+            print(f"  move: [{eng}|{side}] {move_to_algebraic(move)}")
+
+        black_to_move = not black_to_move
+
+    b_cnt = popcount(P)
+    w_cnt = popcount(O)
+    if b_cnt > w_cnt:
+        result = f"Black wins {b_cnt}:{w_cnt}"
+    elif w_cnt > b_cnt:
+        result = f"White wins {b_cnt}:{w_cnt}"
+    else:
+        result = f"Draw {b_cnt}:{w_cnt}"
+    return b_cnt, w_cnt, result, iters_black_total, iters_white_total
+
+
+def run_timed_head_to_head(neg_engine: Engine, mcts_engine: MCTSEngine,
+                           time_limits: List[int] = TIMED_COMPARE_MS,
+                           games_per_match: int = 4):
+    """Timed head-to-head: Negamax v4_full vs MCTS, at multiple time limits.
+
+    Each time-limit plays `games_per_match` games, alternating colours.
+    """
+    print("\n" + "=" * 90)
+    print(f" Timed Head-to-Head: Negamax v4_full vs MCTS")
+    print(f" ({games_per_match} games per time limit, alternating colours)")
+    print("=" * 90)
+    print()
+    print(f"{'Time/ms':>8s}  {'AB_Black':>12s}  {'MCTS_White':>12s}  "
+          f"{'MCTS_Black':>12s}  {'AB_White':>12s}  "
+          f"{'AB_Wins':>8s}  {'MCTS_Wins':>8s}  {'Draws':>6s}")
+    print("-" * 90)
+
+    all_results = []
+
+    for tl in time_limits:
+        ab_wins = 0   # Negamax wins (regardless of colour)
+        mcts_wins = 0
+        draws = 0
+
+        for g in range(games_per_match):
+            neg_engine.init()
+            mcts_engine.init()
+
+            if g % 2 == 0:
+                # Negamax = Black, MCTS = White
+                b_cnt, w_cnt, _, _, _ = play_game_timed(
+                    neg_engine, mcts_engine, tl, tl,
+                    black_is_mcts=False, white_is_mcts=True)
+                if b_cnt > w_cnt:
+                    ab_wins += 1
+                elif w_cnt > b_cnt:
+                    mcts_wins += 1
+                else:
+                    draws += 1
+            else:
+                # MCTS = Black, Negamax = White
+                b_cnt, w_cnt, _, _, _ = play_game_timed(
+                    mcts_engine, neg_engine, tl, tl,
+                    black_is_mcts=True, white_is_mcts=False)
+                if b_cnt > w_cnt:
+                    mcts_wins += 1
+                elif w_cnt > b_cnt:
+                    ab_wins += 1
+                else:
+                    draws += 1
+
+            print(f"  {tl:>6d}ms  game {g+1}: (AB={ab_wins}, MCTS={mcts_wins}, D={draws})")
+
+        all_results.append({
+            "time_limit_ms": tl,
+            "negamax_wins": ab_wins,
+            "mcts_wins": mcts_wins,
+            "draws": draws,
+            "games": games_per_match,
+        })
+
+    print("-" * 90)
+    print(f"\n{'Results':-^60}")
+    print(f"\n{'Time':>8s}  {'Negamax':>10s}  {'MCTS':>10s}  {'Draws':>6s}  {'Winner':>10s}")
+    print("-" * 60)
+    for r in all_results:
+        winner = "Negamax" if r["negamax_wins"] > r["mcts_wins"] else \
+                 "MCTS" if r["mcts_wins"] > r["negamax_wins"] else "Draw"
+        print(f"  {r['time_limit_ms']:>4d}ms  "
+              f"{r['negamax_wins']:>8d}/{r['games']}  "
+              f"{r['mcts_wins']:>8d}/{r['games']}  "
+              f"{r['draws']:>6d}  {winner:>10s}")
+
+    return all_results
 
 
 # =====================================================================
@@ -837,7 +1082,7 @@ def print_mcts_time_table(mcts_results: List[Dict]):
 def print_mcts_move_table(mcts_results: List[Dict]):
     """Print MCTS move choices at each iteration level."""
     print("\n" + "=" * 140)
-    print(" MCTS: Move Choices & Consistency (most common move over 3 runs)")
+    print(f" MCTS: Move Choices & Consistency (most common move over {MCTS_REPEATS} runs)")
     print("=" * 140)
 
     from collections import defaultdict
@@ -873,16 +1118,16 @@ def print_mcts_move_table(mcts_results: List[Dict]):
 
 
 def print_mcts_vs_negamax(mcts_results: List[Dict], negamax_results: List[Dict]):
-    """Compare MCTS move choices to Negamax v4_full as reference."""
+    """Compare MCTS move choices to Negamax v1 (sound Alpha-Beta) as reference."""
     print("\n" + "=" * 120)
-    print(" MCTS vs Negamax v4_full Move Comparison")
+    print(" MCTS vs Negamax v1_alphabeta Move Comparison")
     print("=" * 120)
 
-    # Build lookup: (position, depth) -> v4 move for negamax results
-    v4_moves: Dict[str, int] = {}
+    # Build lookup: (position, depth) -> v1 move for negamax results
+    v1_moves: Dict[str, int] = {}
     for r in negamax_results:
-        if r["engine"] == "v4_full" and r["success"]:
-            v4_moves[(r["position"], r["depth"])] = r["move"]
+        if r["engine"] == "v1_alphabeta" and r["success"]:
+            v1_moves[(r["position"], r["depth"])] = r["move"]
 
     from collections import defaultdict
     by_pos = defaultdict(dict)
@@ -891,12 +1136,12 @@ def print_mcts_vs_negamax(mcts_results: List[Dict], negamax_results: List[Dict])
 
     all_iters = sorted(set(r["iterations"] for r in mcts_results))
 
-    # Use v4's d=8 results as baseline comparison (strongest single-depth)
+    # Use v1's d=8 results as baseline comparison (sound Alpha-Beta)
     compare_depth = 8
 
-    print(f"\n  Comparing MCTS moves to Negamax v4_full at depth={compare_depth}")
+    print(f"\n  Comparing MCTS moves to Negamax v1 (d={compare_depth})")
     print()
-    header = f"{'Position':<10s}  {'v4_d8':>6s}"
+    header = f"{'Position':<10s}  {'v1_d8':>6s}"
     for it in all_iters:
         header += f"  {'iters='+str(it):>18s}"
     print(header)
@@ -906,15 +1151,15 @@ def print_mcts_vs_negamax(mcts_results: List[Dict], negamax_results: List[Dict])
     total_tests = 0
 
     for pos_name in sorted(by_pos):
-        v4_move = v4_moves.get((pos_name, compare_depth), -1)
-        v4_str = move_to_algebraic(v4_move) if v4_move >= 0 else "??"
-        row = f"{pos_name:<10s}  {v4_str:>6s}"
+        v1_move = v1_moves.get((pos_name, compare_depth), -1)
+        v1_str = move_to_algebraic(v1_move) if v1_move >= 0 else "??"
+        row = f"{pos_name:<10s}  {v1_str:>6s}"
         for it in all_iters:
             r = by_pos[pos_name].get(it)
             if r:
-                match = "✓" if r["move"] == v4_move else "—"
+                match = "✓" if r["move"] == v1_move else "—"
                 row += f"  {move_to_algebraic(r['move']):>4s} {match:>4s} {r['agreement']:.0%}"
-                if r["move"] == v4_move:
+                if r["move"] == v1_move:
                     match_counts[it] = match_counts.get(it, 0) + 1
                 total_tests += 0  # noop
             else:
@@ -926,8 +1171,57 @@ def print_mcts_vs_negamax(mcts_results: List[Dict], negamax_results: List[Dict])
     for it in all_iters:
         count = match_counts.get(it, 0)
         pct = count / len(TEST_POSITIONS) * 100
-        print(f"  iters={it:>6d}: matched v4_d8 in {count}/{len(TEST_POSITIONS)} "
+        print(f"  iters={it:>6d}: matched v1_d8 in {count}/{len(TEST_POSITIONS)} "
               f"positions ({pct:.0f}%)")
+
+
+# =====================================================================
+#  Timed depth benchmark — how many depths can each engine reach in a
+#  given time budget?  (Used for §7.4 comparison table.)
+# =====================================================================
+
+def run_timed_depth_benchmark(engines: Dict[str, Engine],
+                              positions: List[Dict],
+                              time_limits_ms: List[int] = [100, 1000, 2000],
+                              runs_per_limit: int = 30,
+                              ) -> Dict[str, Dict[int, float]]:
+    """Measure average depth reached by v1 and v4 under timed search.
+
+    Each (engine, time_limit) pair is tested `runs_per_limit` times,
+    cycling through `positions`. Calls c_get_best_move_timed and records
+    the returned depth_reached value.
+
+    Returns: {engine_key: {time_limit_ms: avg_depth}}
+    """
+    print("\n" + "=" * 80)
+    print(" Timed Depth Benchmark")
+    print("=" * 80)
+    print(f"  {runs_per_limit} runs per time limit, cycling {len(positions)} positions\n")
+
+    results: Dict[str, Dict[int, float]] = {}
+
+    for eng_key in ["v1_alphabeta", "v4_full"]:
+        if eng_key not in engines:
+            continue
+        engine = engines[eng_key]
+        results[eng_key] = {}
+        engine.set_debug(0)
+
+        print(f"  --- {engine.name} ---")
+        for tl in time_limits_ms:
+            depths = []
+            for run in range(runs_per_limit):
+                engine.init()
+                pos = positions[run % len(positions)]
+                _, _, depth = engine.get_best_move_timed(tl, pos["P"], pos["O"])
+                depths.append(depth)
+            avg_d = sum(depths) / len(depths)
+            results[eng_key][tl] = avg_d
+            print(f"    {tl:>4d}ms: avg depth = {avg_d:.1f}  "
+                  f"(min={min(depths)}, max={max(depths)})")
+        print()
+
+    return results
 
 
 # =====================================================================
@@ -993,6 +1287,12 @@ def main():
                         help="Include MCTS engine benchmark")
     parser.add_argument("--mcts-only", action="store_true",
                         help="Run only MCTS benchmark (skip Negamax engines)")
+    parser.add_argument("--timed-compare", action="store_true",
+                        help="Timed head-to-head: Negamax v4 vs MCTS at multiple time limits")
+    parser.add_argument("--timed-games", type=int, default=10,
+                        help="Games per time limit in timed compare (default 10)")
+    parser.add_argument("--timed-depth", action="store_true",
+                        help="Measure avg depth reached per engine at each time limit")
     args = parser.parse_args()
 
     print("=" * 60)
@@ -1014,7 +1314,9 @@ def main():
     # ── Negamax benchmark ──
     engines: Dict[str, Engine] = {}
     results: List[Dict] = []
-    if not args.mcts_only:
+    # Skip full bench if only timed-depth is requested
+    skip_full_bench = args.timed_depth and not (args.mcts or args.mcts_only)
+    if not args.mcts_only and not skip_full_bench:
         print("Loading engines...")
         engines = create_all_engines()
         for ek, eng in engines.items():
@@ -1031,7 +1333,7 @@ def main():
             print(f"  - {pos['name']}: {pos['desc']}")
 
         print(f"\nStarting benchmark (timeout={SEARCH_TIMEOUT_S:.0f}s per call)...\n")
-        results = run_benchmark(engines, TEST_POSITIONS, depths_map, debug_off=True)
+        results = run_benchmark(engines, TEST_POSITIONS, depths_map, debug_off=True, repeats=NEGAMAX_REPEATS)
 
         # Print reports
         print_per_depth_speed_table(results)
@@ -1040,8 +1342,17 @@ def main():
         if args.compare:
             run_head_to_head(engines, games_per_match=args.games, depth=args.depth)
 
+    # ── Timed depth benchmark ──
+    if args.timed_depth:
+        # Only load v1 + v4; skip the full bench
+        if skip_full_bench:
+            engines = create_all_engines()
+        if engines:
+            run_timed_depth_benchmark(engines, TEST_POSITIONS)
+
     # ── MCTS benchmark ──
     mcts_results = None
+    mcts_engine = None
     if args.mcts or args.mcts_only:
         print("\n" + "=" * 60)
         print(" MCTS Engine Benchmark")
@@ -1076,6 +1387,24 @@ def main():
     if mcts_results:
         mcts_ok = sum(1 for r in mcts_results if r["success"])
         print(f"Total (MCTS): {len(mcts_results)} searches -- {mcts_ok} OK")
+
+    # ── Timed Head-to-Head ──
+    if args.timed_compare:
+        if "v4_full" not in engines:
+            engines = create_all_engines()
+        if not mcts_engine:
+            try:
+                mcts_engine = MCTSEngine("search_mct")
+                print(f"  [OK] MCTS engine loaded for timed compare\n")
+            except FileNotFoundError as e:
+                print(f"  [FAIL] {e}\n")
+                mcts_engine = None
+
+        if mcts_engine and "v4_full" in engines:
+            run_timed_head_to_head(
+                engines["v4_full"], mcts_engine,
+                time_limits=TIMED_COMPARE_MS,
+                games_per_match=args.timed_games)
 
     print("\n[OK] Benchmark complete!")
 

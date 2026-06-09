@@ -138,6 +138,14 @@ _spec_mcts.register_func("mcts_search", [
     Board8x8, ctypes.c_int,
     ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),
     ctypes.c_int,
+    ctypes.POINTER(ctypes.c_int),     # out_win_rate_pct (nullable)
+], None)
+_spec_mcts.register_func("mcts_search_timed", [
+    Board8x8, ctypes.c_int,
+    ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),
+    ctypes.c_int,                      # time_limit_ms
+    ctypes.POINTER(ctypes.c_int),      # out_win_rate_pct (nullable)
+    ctypes.POINTER(ctypes.c_int),      # out_iterations
 ], None)
 _spec_mcts.register_func("get_legal_moves_list", [
     Board8x8, ctypes.c_int, ctypes.POINTER(ctypes.c_int),
@@ -292,8 +300,18 @@ class _MCTSAdapter:
         "name": "mcts",
         "label": "MCTS (蒙特卡洛)",
         "params": [
-            {"key": "iterations", "type": "int", "default": 20000,
-             "min": 100, "max": 10000000, "label": "模拟次数"},
+            {"key": "strategy",       "type": "select",
+             "options": [
+                 {"value": "fixed_iterations", "label": "固定模拟次数"},
+                 {"value": "time_limit",       "label": "限时搜索"},
+             ],
+             "label": "搜索模式"},
+            {"key": "iterations",     "type": "int", "default": 20000,
+             "min": 100, "max": 10000000, "label": "模拟次数",
+             "show_if": {"strategy": "fixed_iterations"}},
+            {"key": "time_limit_ms",  "type": "int", "default": 3000,
+             "min": 100, "max": 600000, "label": "时间上限 (ms)",
+             "show_if": {"strategy": "time_limit"}},
         ],
     }
 
@@ -315,9 +333,12 @@ class _MCTSAdapter:
         底层 MCTS 搜索。
 
         Parameters:
-            black_bb: 真实黑棋位棋盘（不可调换）
-            white_bb: 真实白棋位棋盘（不可调换）
+            black_bb:    真实黑棋位棋盘（不可调换）
+            white_bb:    真实白棋位棋盘（不可调换）
             player_value: 1=黑方, -1=白方。None 时按 occupied 奇偶推断。
+
+        Returns:
+            (move, win_rate_pct) — win_rate_pct ∈ [0, 100]
         """
         spec = _dll_registry["mcts"]
 
@@ -335,18 +356,64 @@ class _MCTSAdapter:
 
         out_x = ctypes.c_int(-1)
         out_y = ctypes.c_int(-1)
+        win_rate = ctypes.c_int(0)
 
         spec.lib.mcts_search(
             board, ctypes.c_int(player),
             ctypes.byref(out_x), ctypes.byref(out_y),
             ctypes.c_int(iterations),
+            ctypes.byref(win_rate),
         )
 
         if out_x.value < 0 or out_y.value < 0:
             return None, 0
 
         move = out_x.value * 8 + out_y.value
-        return move, 0
+        return move, win_rate.value
+
+    # ── 限时搜索 ──
+
+    @classmethod
+    def _search_timed(cls, time_limit_ms: int, black_bb: int, white_bb: int,
+                      player_value: Optional[int] = None
+                      ) -> Tuple[Optional[int], int, int]:
+        """底层 MCTS 限时搜索。Returns (move, win_rate_pct, iterations_done)。"""
+        spec = _dll_registry["mcts"]
+        board = _bb_to_board(black_bb, white_bb)
+
+        if player_value == 1:
+            player = 1
+        elif player_value == -1:
+            player = 2
+        else:
+            occupied = (black_bb | white_bb).bit_count()
+            player = 1 if occupied % 2 == 0 else 2
+
+        out_x = ctypes.c_int(-1)
+        out_y = ctypes.c_int(-1)
+        win_rate = ctypes.c_int(0)
+        iters_done = ctypes.c_int(0)
+
+        spec.lib.mcts_search_timed(
+            board, ctypes.c_int(player),
+            ctypes.byref(out_x), ctypes.byref(out_y),
+            ctypes.c_int(time_limit_ms),
+            ctypes.byref(win_rate),
+            ctypes.byref(iters_done),
+        )
+
+        if out_x.value < 0 or out_y.value < 0:
+            return None, 0, iters_done.value
+
+        move = out_x.value * 8 + out_y.value
+        return move, win_rate.value, iters_done.value
+
+    @classmethod
+    def get_best_move_timed(cls, time_limit_ms: int,
+                            player_bb: int, opponent_bb: int
+                            ) -> Tuple[Optional[int], int, int]:
+        """限时搜索。Returns (move, win_rate_pct, iterations_done)。"""
+        return cls._search_timed(time_limit_ms, player_bb, opponent_bb, None)
 
     # ── 统一搜索入口 ──
 
@@ -358,23 +425,30 @@ class _MCTSAdapter:
         MCTS 统一搜索。
 
         params 键:
-          • iterations → 模拟次数（默认 20000）
+          • iterations     → 固定模拟次数（默认 20000）
+          • time_limit_ms  → 限时搜索（毫秒），优先级高于 iterations
 
         **注意:** player_bb/opponent_bb 必须是真实的 black_bb/white_bb
         （不可调换），由 player_value 指示搜索方颜色。
 
-        Returns: (move, score, extra)
-          extra = 实际执行的迭代次数
+        Returns: (move, win_rate_pct, extra)
+          extra = iterations 或 iterations_done
         """
+        if "time_limit_ms" in params:
+            tl = params["time_limit_ms"]
+            if player_value == 1:
+                move, wr, iters = cls._search_timed(tl, player_bb, opponent_bb, 1)
+            else:
+                move, wr, iters = cls._search_timed(tl, opponent_bb, player_bb, -1)
+            return move, wr, iters
+
         iters = params.get("iterations", cls.DEFAULT_ITERATIONS)
-
-        # 恢复真实的 black/white 并根据 player_value 传给底层搜索
         if player_value == 1:
-            move, score = cls._search(iters, player_bb, opponent_bb, 1)
+            move, win_rate = cls._search(iters, player_bb, opponent_bb, 1)
         else:
-            move, score = cls._search(iters, opponent_bb, player_bb, -1)
+            move, win_rate = cls._search(iters, opponent_bb, player_bb, -1)
 
-        return move, score, iters
+        return move, win_rate, iters
 
     @classmethod
     def search_with_iterations(cls, iterations: int,

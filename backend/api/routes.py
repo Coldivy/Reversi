@@ -133,8 +133,11 @@ async def get_ai_move(request: GameRequest):
     # ── 日志 ──
     side = "黑" if request.player == 1 else "白"
     param_repr = ", ".join(f"{k}={v}" for k, v in params.items())
+    score_label = "胜率" if request.engine_type == "mcts" else "估分"
+    score_suffix = "%" if request.engine_type == "mcts" else ""
     print(f"AI [{request.engine_type}] ({side}) | {param_repr} | "
-          f"耗时: {elapsed:.3f}s | 落子: {move} | 估分: {score}")
+          f"耗时: {elapsed:.3f}s | 落子: {move} | "
+          f"{score_label}: {score}{score_suffix}")
 
     if move is None:
         return {"r": -1, "c": -1, "depth": extra}
