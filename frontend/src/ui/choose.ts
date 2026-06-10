@@ -99,14 +99,19 @@ function readSideConfig(sideEl: HTMLElement): EngineConfig | null {
   const engine = engineSelect.value;
 
   const params: Record<string, number | string> = {};
-  sideEl.querySelectorAll<HTMLInputElement>(".param-value").forEach((inp) => {
-    const key = inp.dataset.paramKey!;
-    params[key] = parseInt(inp.value, 10) || 0;
-  });
-  sideEl.querySelectorAll<HTMLSelectElement>(".param-select").forEach((sel) => {
-    const key = sel.dataset.paramKey!;
-    const val = parseInt(sel.value, 10);
-    params[key] = isNaN(val) ? sel.value : val;
+  /* 只收集可见行的参数值 — 跳过 display:none（show_if 隐藏的互斥参数） */
+  sideEl.querySelectorAll<HTMLElement>(".param-row").forEach((row) => {
+    if (row.style.display === "none") return;
+    const inp = row.querySelector<HTMLInputElement>(".param-value");
+    if (inp) {
+      params[inp.dataset.paramKey!] = parseInt(inp.value, 10) || 0;
+      return;
+    }
+    const sel = row.querySelector<HTMLSelectElement>(".param-select");
+    if (sel) {
+      const val = parseInt(sel.value, 10);
+      params[sel.dataset.paramKey!] = isNaN(val) ? sel.value : val;
+    }
   });
 
   return { url, engine, params };
@@ -290,9 +295,10 @@ export async function showChoosePanel(
     <div id="start-btn">开始</div>
 
     <div id="remarks">
-      留空 URL → 该方由人类手动落子<br>
-      /api/ai-move → 本机 AI 引擎 API<br>
-      <b>加新引擎只需改后端 search.py</b>，前端自动适配。
+      <p>留空 URL → 该方由人类点击落子<br>
+      填 <code>/api/ai-move</code> → 使用本机 AI（点 🔍 可探测对端引擎）</p>
+      <p><b>引擎推荐</b>：Negamax 目前内置最强，MCTS 适合探索</p>
+      <p><b>注意</b>：同一 Negamax 后端不要同时跑 fixed_depth 和 time_limit，<br>两者共用置换表会互相污染。不同引擎（如 Negamax + MCTS）无此限制</p>
     </div>
   `;
 
@@ -330,20 +336,30 @@ export async function showChoosePanel(
 
   /**
    * 包裹 autoProbeSide，联用更新探状态和按钮。
+   * 如果 URL 与上次成功探测时一致，跳过（避免重置用户已配置的参数）。
    */
+  const lastProbedUrl: Record<string, string> = {};
+
   async function probeAndUpdate(
     sideEl: HTMLElement,
     sideSpecs: Record<string, EngineSpec[]>,
   ) {
     const sideId = sideEl.id;
+    const raw = sideEl.querySelector<HTMLInputElement>(".side-url")!.value.trim();
+
+    if (raw && raw === lastProbedUrl[sideId]) {
+      return; // URL 没变，跳过
+    }
+
     sideProbeStatus[sideId] = "pending";
     updateStartButton();
 
     try {
       await autoProbeSide(sideEl, sideSpecs);
-      /* autoProbeSide 不抛错即表示成功（包括空 URL 也算成功） */
       sideProbeStatus[sideId] = "ok";
+      lastProbedUrl[sideId] = raw; // 记录本次成功探测的 URL
     } catch {
+      /* 失败不记录 URL，下次仍允许重试 */
       sideProbeStatus[sideId] = "err";
     }
     updateStartButton();
